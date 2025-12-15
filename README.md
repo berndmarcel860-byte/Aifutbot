@@ -1,10 +1,16 @@
 # AI Scalping Bot for Binance Futures
 
-A professional Python AI scalping bot for Binance Futures that scans multiple trading pairs, uses high-probability technical indicators and price-action patterns to identify best trading opportunities, and sends formatted signals to Telegram. Now with **automatic volatile coin selection** and **optional auto-trading**.
+A professional Python AI scalping bot for Binance Futures that scans multiple trading pairs, uses high-probability technical indicators and price-action patterns to identify best trading opportunities, and sends formatted signals to Telegram. Now with **automatic volatile coin selection**, **market direction filtering**, and **optional auto-trading**.
 
 ## 🎯 Features
 
-### 🆕 NEW: Automatic Volatile Coin Selection
+### 🆕 NEW: Market Direction Filtering
+- **Smart Direction Detection**: Analyzes BTC (or configurable symbol) to determine overall market trend
+- **Directional Trading**: Only generates LONG signals in bullish markets, SHORT signals in bearish markets
+- **Reduces Losses**: Prevents counter-trend trades that often result in losses
+- **Configurable**: Can be enabled/disabled and uses customizable reference symbol
+
+### 🆕 Automatic Volatile Coin Selection
 - **Dynamic Symbol Selection**: Automatically identifies and scans the most volatile coins every cycle
 - **Volatility Scoring**: Ranks coins by price change % and trading volume
 - **Fresh Opportunities**: Symbol list refreshes on every scan to catch emerging trends
@@ -44,9 +50,9 @@ A professional Python AI scalping bot for Binance Futures that scans multiple tr
 - **Dynamic Risk Management**: 2% risk per trade with leverage support
 
 ### 📱 Formatted Telegram Signals
-Receive beautifully formatted trading signals:
+Receive beautifully formatted trading signals with market direction:
 ```
-⚡⚡ BTCUSDT ⚡⚡
+⚡⚡ BTCUSDT ⚡⚡ 📈
 Exchange: Binance Futures
 Direction: LONG
 Market Price: $43,250.00
@@ -66,6 +72,7 @@ Stop Loss:
 1. $42,900.00
 
 📊 Signal Score: 8 points
+🌍 Market: BULLISH
 ```
 
 ## 📋 Requirements
@@ -102,6 +109,10 @@ The bot can be configured by modifying the `BotConfig` class in `ai_scalping_bot
 ```python
 @dataclass
 class BotConfig:
+    # Market Direction Detection
+    use_market_direction_filter: bool = True  # Enable market direction filtering
+    market_direction_symbol: str = 'BTCUSDT'  # Symbol to determine market trend
+    
     # Coin Selection
     auto_select_volatile_coins: bool = True  # Auto-select most volatile coins
     num_coins_to_scan: int = 20              # Number of coins to scan
@@ -133,6 +144,13 @@ class BotConfig:
 ```
 
 ### Key Configuration Options
+
+**Market Direction Filtering:**
+- `use_market_direction_filter = True`: Enables directional filtering (recommended)
+- `market_direction_symbol = 'BTCUSDT'`: Symbol used to detect overall market trend
+- In **BULLISH** markets: Only generates LONG signals
+- In **BEARISH** markets: Only generates SHORT signals  
+- In **NEUTRAL** markets: Allows both LONG and SHORT signals
 
 **Volatile Coin Selection:**
 - `auto_select_volatile_coins = True`: Bot automatically selects top N most volatile coins
@@ -172,27 +190,34 @@ python ai_scalping_bot.py
 
 ### What the Bot Does Each Cycle
 
-1. **Select Coins** (if auto_select_volatile_coins = True):
+1. **Detect Market Direction** (if enabled):
+   - Fetches data for reference symbol (default: BTCUSDT)
+   - Analyzes EMA alignment, price trends, and momentum
+   - Determines: BULLISH, BEARISH, or NEUTRAL
+   - Logs and displays market direction
+
+2. **Select Coins** (if auto_select_volatile_coins = True):
    - Fetches 24hr ticker data for all USDT pairs
    - Calculates volatility score (price change % + volume)
    - Selects top N most volatile coins
 
-2. **Check Existing Positions**:
+3. **Check Existing Positions**:
    - Gets all open positions from Binance
    - Gets all open orders from Binance
    - Creates exclusion list of coins to skip
 
-3. **Scan Selected Coins**:
+4. **Scan Selected Coins**:
    - Analyzes each coin (excluding those with positions)
    - Calculates indicators and patterns
    - Scores opportunities (0-12+ points)
+   - **Filters by market direction** (LONG in bullish, SHORT in bearish)
 
-4. **Send Top Signals**:
+5. **Send Top Signals**:
    - Sorts by score (highest first)
-   - Sends top 5 signals to Telegram
+   - Sends top 5 signals to Telegram with market direction indicator
    - If auto_trade enabled, executes trades automatically
 
-5. **Wait and Repeat**:
+6. **Wait and Repeat**:
    - Waits 60 seconds (configurable)
    - Repeats from step 1
 

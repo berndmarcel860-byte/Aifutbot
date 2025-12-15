@@ -73,6 +73,8 @@ class BotConfig:
     
     # Signal generation
     signal_threshold: int = 6  # Minimum score for signal generation
+    market_direction_symbol: str = 'BTCUSDT'  # Symbol to use for overall market direction
+    use_market_direction_filter: bool = True  # Filter signals based on market direction
     
     # Operational
     scan_interval: int = 60  # seconds
@@ -339,10 +341,21 @@ class TelegramNotifier:
     
     def send_signal_alert(self, symbol: str, direction: str, market_price: float,
                          leverage: int, leverage_type: str, entries: List[float],
-                         take_profit: float, stop_loss: float, score: int = None):
+                         take_profit: float, stop_loss: float, score: int = None,
+                         market_direction: str = None):
         """Send formatted trading signal alert"""
+        # Add market direction indicator
+        market_emoji = ""
+        if market_direction:
+            if market_direction == "BULLISH":
+                market_emoji = " 📈"
+            elif market_direction == "BEARISH":
+                market_emoji = " 📉"
+            elif market_direction == "NEUTRAL":
+                market_emoji = " ↔️"
+        
         message = (
-            f"⚡⚡ <b>{symbol}</b> ⚡⚡\n"
+            f"⚡⚡ <b>{symbol}</b> ⚡⚡{market_emoji}\n"
             f"Exchange: Binance Futures\n"
             f"Direction: {direction}\n"
             f"Market Price: ${market_price:.4f}\n\n"
@@ -362,6 +375,9 @@ class TelegramNotifier:
         
         if score:
             message += f"\n\n📊 Signal Score: {score} points"
+        
+        if market_direction:
+            message += f"\n🌍 Market: {market_direction}"
         
         self.send_message(message)
 
@@ -509,6 +525,85 @@ class SignalGenerator:
         self.config = config
         self.indicators = TechnicalIndicators()
         self.pattern_analyzer = PriceActionAnalyzer()
+        self.market_direction = None  # Cache market direction
+        self.market_direction_updated = 0  # Timestamp of last update
+    
+    def detect_market_direction(self, klines: List[List]) -> str:
+        """
+        Detect overall market direction (BULLISH, BEARISH, or NEUTRAL)
+        Uses multiple timeframe analysis and trend indicators
+        """
+        try:
+            # Convert klines to DataFrame
+            df = pd.DataFrame(klines, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+                'taker_buy_quote', 'ignore'
+            ])
+            
+            df['close'] = df['close'].astype(float)
+            df['high'] = df['high'].astype(float)
+            df['low'] = df['low'].astype(float)
+            df['open'] = df['open'].astype(float)
+            
+            # Calculate trend indicators
+            ema_fast = self.indicators.ema(df['close'], self.config.ema_fast)
+            ema_slow = self.indicators.ema(df['close'], self.config.ema_slow)
+            ema_long = self.indicators.ema(df['close'], 50)  # Longer term trend
+            
+            # Current values
+            current_price = df['close'].iloc[-1]
+            ema_fast_val = ema_fast.iloc[-1]
+            ema_slow_val = ema_slow.iloc[-1]
+            ema_long_val = ema_long.iloc[-1]
+            
+            # Price trend over last 20 candles
+            price_20_ago = df['close'].iloc[-20]
+            price_change_pct = ((current_price - price_20_ago) / price_20_ago) * 100
+            
+            # Direction scoring
+            bullish_score = 0
+            bearish_score = 0
+            
+            # Fast EMA above Slow EMA (short-term trend)
+            if ema_fast_val > ema_slow_val:
+                bullish_score += 2
+            elif ema_fast_val < ema_slow_val:
+                bearish_score += 2
+            
+            # Price above/below long EMA (long-term trend)
+            if current_price > ema_long_val:
+                bullish_score += 2
+            elif current_price < ema_long_val:
+                bearish_score += 2
+            
+            # Recent price momentum
+            if price_change_pct > 1:  # More than 1% up
+                bullish_score += 1
+            elif price_change_pct < -1:  # More than 1% down
+                bearish_score += 1
+            
+            # EMA alignment (all EMAs in order)
+            if ema_fast_val > ema_slow_val > ema_long_val:
+                bullish_score += 2
+            elif ema_fast_val < ema_slow_val < ema_long_val:
+                bearish_score += 2
+            
+            # Determine direction
+            if bullish_score >= 4 and bullish_score > bearish_score:
+                direction = 'BULLISH'
+            elif bearish_score >= 4 and bearish_score > bullish_score:
+                direction = 'BEARISH'
+            else:
+                direction = 'NEUTRAL'
+            
+            logger.info(f"Market direction detected: {direction} (Bullish: {bullish_score}, Bearish: {bearish_score}, Price change: {price_change_pct:.2f}%)")
+            
+            return direction
+            
+        except Exception as e:
+            logger.error(f"Error detecting market direction: {e}")
+            return 'NEUTRAL'
     
     def analyze_market(self, klines: List[List]) -> Tuple[Optional[str], Dict]:
         """
@@ -567,14 +662,15 @@ class SignalGenerator:
             'pullback': pullback
         }
         
-        # Generate signal and score
-        signal, score = self._generate_signal(analysis)
+        # Generate signal and score (pass market direction if available)
+        signal, score = self._generate_signal(analysis, market_direction=self.market_direction)
         analysis['signal_score'] = score
+        analysis['market_direction'] = self.market_direction
         
         return signal, analysis
     
-    def _generate_signal(self, analysis: Dict) -> Tuple[Optional[str], int]:
-        """Generate trading signal based on analysis. Returns (signal, score)"""
+    def _generate_signal(self, analysis: Dict, market_direction: str = None) -> Tuple[Optional[str], int]:
+        """Generate trading signal based on analysis and market direction. Returns (signal, score)"""
         price = analysis['price']
         rsi = analysis['rsi']
         ema_fast = analysis['ema_fast']
@@ -643,6 +739,18 @@ class SignalGenerator:
             short_score += 2
         if pullback == 'BEARISH':
             short_score += 1
+        
+        # Apply market direction filter if enabled
+        if self.config.use_market_direction_filter and market_direction:
+            if market_direction == 'BULLISH':
+                # In bullish market, only consider LONG signals
+                short_score = 0
+                logger.debug(f"Market is BULLISH - filtering out SHORT signals")
+            elif market_direction == 'BEARISH':
+                # In bearish market, only consider SHORT signals
+                long_score = 0
+                logger.debug(f"Market is BEARISH - filtering out LONG signals")
+            # NEUTRAL market: allow both directions
         
         # Use configurable threshold for signal generation
         if long_score >= self.config.signal_threshold and long_score > short_score:
@@ -953,6 +1061,26 @@ class ScalpingBot:
         """Scan multiple symbols and find best trading opportunities"""
         signals = []
         
+        # Detect overall market direction if enabled
+        if self.config.use_market_direction_filter:
+            try:
+                logger.info(f"Detecting market direction using {self.config.market_direction_symbol}...")
+                direction_klines = self.client.get_klines(
+                    self.config.market_direction_symbol, 
+                    self.config.timeframe, 
+                    limit=500
+                )
+                market_direction = self.signal_generator.detect_market_direction(direction_klines)
+                self.signal_generator.market_direction = market_direction
+                
+                # Send notification about market direction
+                direction_emoji = "📈" if market_direction == "BULLISH" else "📉" if market_direction == "BEARISH" else "↔️"
+                logger.info(f"{direction_emoji} Market Direction: {market_direction}")
+                
+            except Exception as e:
+                logger.error(f"Failed to detect market direction: {e}")
+                self.signal_generator.market_direction = 'NEUTRAL'
+        
         # Get symbols to scan
         if self.config.auto_select_volatile_coins:
             symbols_to_scan = self.get_most_volatile_symbols(self.config.num_coins_to_scan)
@@ -1011,7 +1139,8 @@ class ScalpingBot:
                         'atr': atr,
                         'bos': analysis['bos'],
                         'liquidity_sweep': analysis['liquidity_sweep'],
-                        'analysis': analysis
+                        'analysis': analysis,
+                        'market_direction': analysis.get('market_direction')
                     }
                     
                     signals.append(signal_data)
@@ -1048,7 +1177,8 @@ class ScalpingBot:
                     entries=signal_data['entries'],
                     take_profit=signal_data['take_profit'],
                     stop_loss=signal_data['stop_loss'],
-                    score=signal_data['score']
+                    score=signal_data['score'],
+                    market_direction=signal_data.get('market_direction')
                 )
                 logger.info(f"Signal sent for {signal_data['symbol']}")
                 
