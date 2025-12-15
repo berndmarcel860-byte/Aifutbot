@@ -95,6 +95,25 @@ pip install -r requirements.txt
 ```
 
 3. **Set up environment variables**:
+
+**Option A: Using .env file (Recommended)**
+```bash
+# Copy the example file
+cp .env.example .env
+
+# Edit .env and add your actual credentials
+nano .env
+```
+
+Your `.env` file should look like:
+```
+BINANCE_API_KEY=your_actual_api_key
+BINANCE_API_SECRET=your_actual_api_secret
+TELEGRAM_BOT_TOKEN=your_telegram_token
+TELEGRAM_CHAT_ID=your_chat_id
+```
+
+**Option B: Using export commands**
 ```bash
 export BINANCE_API_KEY="your_api_key_here"
 export BINANCE_API_SECRET="your_api_secret_here"
@@ -111,6 +130,8 @@ python check_env.py
 ```
 
 **Need help?** See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions and troubleshooting.
+
+**🔒 Security Note:** If you previously exposed your API keys publicly, see [SECURITY_NOTICE.md](SECURITY_NOTICE.md) for immediate action steps.
 
 ## ⚙️ Configuration
 

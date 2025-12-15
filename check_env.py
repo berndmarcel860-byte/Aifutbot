@@ -9,6 +9,14 @@ Usage: python check_env.py
 import os
 import sys
 
+# Try to load .env file if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load .env file if it exists
+    print("📁 Loaded environment variables from .env file\n")
+except ImportError:
+    print("ℹ️  python-dotenv not installed, using system environment only\n")
+
 def check_env():
     """Check if required environment variables are set"""
     print("=" * 60)

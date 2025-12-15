@@ -18,6 +18,14 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass, asdict
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load .env file if it exists
+except ImportError:
+    # python-dotenv not installed, will use system environment variables only
+    pass
+
 
 # ============================================================================
 # CONFIGURATION
