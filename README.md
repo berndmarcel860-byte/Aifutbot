@@ -1,13 +1,26 @@
 # AI Scalping Bot for Binance Futures
 
-A professional Python AI scalping bot for Binance Futures that scans multiple trading pairs, uses high-probability technical indicators and price-action patterns to identify best trading opportunities, and sends formatted signals to Telegram.
+A professional Python AI scalping bot for Binance Futures that scans multiple trading pairs, uses high-probability technical indicators and price-action patterns to identify best trading opportunities, and sends formatted signals to Telegram. Now with **automatic volatile coin selection** and **optional auto-trading**.
 
 ## 🎯 Features
 
+### 🆕 NEW: Automatic Volatile Coin Selection
+- **Dynamic Symbol Selection**: Automatically identifies and scans the most volatile coins every cycle
+- **Volatility Scoring**: Ranks coins by price change % and trading volume
+- **Fresh Opportunities**: Symbol list refreshes on every scan to catch emerging trends
+- **Position-Aware Filtering**: Automatically skips coins with existing positions or orders
+
+### 🆕 NEW: Auto-Trading Mode
+- **Optional Automatic Execution**: Enable `auto_trade` to execute signals automatically
+- **Safe Default**: Auto-trading is OFF by default (signals-only mode)
+- **Full DCA Implementation**: Automatically places all 4 entry orders, TP, and SL
+- **Multi-Symbol Support**: Can trade multiple pairs simultaneously
+
 ### 🔍 Multi-Symbol Scanner
-- **Scans 20+ Popular Pairs**: Automatically analyzes BTC, ETH, BNB, SOL, XRP, ADA, DOGE, MATIC, DOT, AVAX, LINK, UNI, ATOM, LTC, NEAR, APT, ARB, OP, SUI, INJ and more
-- **Smart Signal Ranking**: Scores each opportunity and sends only the best signals (top 5 by default)
-- **Continuous Monitoring**: Scans all pairs every 60 seconds for new opportunities
+- **Intelligent Scanning**: Analyzes 20+ pairs simultaneously
+- **Best Opportunities First**: Scores and ranks all signals by quality
+- **Smart Filtering**: Skips coins with open positions/orders to prevent conflicts
+- **Continuous Monitoring**: Scans all pairs every 60 seconds
 
 ### Technical Indicators
 - **EMA (Exponential Moving Average)**: Fast (9) and Slow (21) periods for trend identification
@@ -89,19 +102,24 @@ The bot can be configured by modifying the `BotConfig` class in `ai_scalping_bot
 ```python
 @dataclass
 class BotConfig:
-    # Trading parameters
-    symbols_to_scan: List[str] = None  # Auto-populated with 20 popular pairs
-    timeframe: str = '5m'              # Candle timeframe
-    leverage: int = 10                 # Leverage (1-125)
-    leverage_type: str = 'Cross'       # Cross or Isolated
+    # Coin Selection
+    auto_select_volatile_coins: bool = True  # Auto-select most volatile coins
+    num_coins_to_scan: int = 20              # Number of coins to scan
+    symbols_to_scan: List[str] = None        # Manual symbol list (if auto is False)
+    
+    # Trading Mode
+    auto_trade: bool = False                 # Enable automatic trade execution
+    timeframe: str = '5m'                    # Candle timeframe
+    leverage: int = 10                       # Leverage (1-125)
+    leverage_type: str = 'Cross'             # Cross or Isolated
     
     # Signal filtering
-    max_signals_per_scan: int = 5      # Top N signals to send
-    signal_threshold: int = 6          # Minimum score (0-12+)
+    max_signals_per_scan: int = 5            # Top N signals to send
+    signal_threshold: int = 6                # Minimum score (0-12+)
     
     # Risk management
-    risk_per_trade: float = 0.02       # 2% risk per trade
-    max_positions: int = 3             # Maximum concurrent positions
+    risk_per_trade: float = 0.02             # 2% risk per trade
+    max_positions: int = 3                   # Maximum concurrent positions
     
     # DCA levels (Fibonacci ratios)
     dca_levels: List[float] = [0.236, 0.382, 0.5, 0.618]
@@ -110,18 +128,25 @@ class BotConfig:
     tp_atr_multiplier: float = 2.5
     sl_atr_multiplier: float = 1.5
     
-    # Indicator periods
-    ema_fast: int = 9
-    ema_slow: int = 21
-    rsi_period: int = 14
-    atr_period: int = 14
-    
     # Scan interval
-    scan_interval: int = 60            # Seconds between market scans
+    scan_interval: int = 60                  # Seconds between market scans
 ```
 
-### Default Scanned Symbols (20 pairs)
-BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, ADAUSDT, DOGEUSDT, MATICUSDT, DOTUSDT, AVAXUSDT, LINKUSDT, UNIUSDT, ATOMUSDT, LTCUSDT, NEARUSDT, APTUSDT, ARBUSDT, OPUSDT, SUIUSDT, INJUSDT
+### Key Configuration Options
+
+**Volatile Coin Selection:**
+- `auto_select_volatile_coins = True`: Bot automatically selects top N most volatile coins
+- `num_coins_to_scan = 20`: How many volatile coins to scan each cycle
+- Coins are re-selected every scan based on 24hr price change % and volume
+
+**Trading Mode:**
+- `auto_trade = False`: **SIGNALS ONLY** - Bot sends signals to Telegram (default, safe)
+- `auto_trade = True`: **AUTO-EXECUTE** - Bot automatically executes trades (use with caution!)
+
+**Position Management:**
+- Bot automatically checks for existing positions/orders
+- Skips coins that already have open positions or orders
+- Prevents duplicate positions on the same coin
 
 ## 🎮 Usage
 
@@ -131,17 +156,49 @@ BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, ADAUSDT, DOGEUSDT, MATICUSDT, DOTUS
 python ai_scalping_bot.py
 ```
 
-The bot will:
-1. Scan all configured symbols every 60 seconds
-2. Score each opportunity (0-12+ points)
-3. Send top 5 signals to Telegram with formatted details
-4. Continue monitoring for new opportunities
+### Operating Modes
 
-### First-Time Setup
+**Mode 1: Signals Only (Default - Recommended)**
+- Set `auto_trade = False` in code
+- Bot scans markets and sends signals to Telegram
+- You manually execute trades based on signals
+- Safer for beginners and testing
 
-1. **Configure Telegram**: Set up bot and get chat ID for receiving signals
-2. **Test the scanner**: Run without trading to see signal quality
-3. **Adjust parameters**: Tune signal_threshold and max_signals_per_scan
+**Mode 2: Auto-Trading (Advanced)**
+- Set `auto_trade = True` in code
+- Bot automatically executes all trades
+- Places market entry + limit DCA orders + TP/SL
+- Monitor closely when enabled!
+
+### What the Bot Does Each Cycle
+
+1. **Select Coins** (if auto_select_volatile_coins = True):
+   - Fetches 24hr ticker data for all USDT pairs
+   - Calculates volatility score (price change % + volume)
+   - Selects top N most volatile coins
+
+2. **Check Existing Positions**:
+   - Gets all open positions from Binance
+   - Gets all open orders from Binance
+   - Creates exclusion list of coins to skip
+
+3. **Scan Selected Coins**:
+   - Analyzes each coin (excluding those with positions)
+   - Calculates indicators and patterns
+   - Scores opportunities (0-12+ points)
+
+4. **Send Top Signals**:
+   - Sorts by score (highest first)
+   - Sends top 5 signals to Telegram
+   - If auto_trade enabled, executes trades automatically
+
+5. **Wait and Repeat**:
+   - Waits 60 seconds (configurable)
+   - Repeats from step 1
+
+### Default Scanned Symbols (20 pairs)
+When `auto_select_volatile_coins = False`, uses these pre-configured symbols:
+BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, ADAUSDT, DOGEUSDT, MATICUSDT, DOTUSDT, AVAXUSDT, LINKUSDT, UNIUSDT, ATOMUSDT, LTCUSDT, NEARUSDT, APTUSDT, ARBUSDT, OPUSDT, SUIUSDT, INJUSDT
 4. **Adjust parameters**: Fine-tune based on market conditions
 
 ### Safety Checks

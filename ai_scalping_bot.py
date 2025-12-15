@@ -38,9 +38,12 @@ class BotConfig:
     # Trading parameters
     symbol: str = 'BTCUSDT'
     symbols_to_scan: List[str] = None  # Will be set to popular futures pairs
+    auto_select_volatile_coins: bool = True  # Automatically select most volatile coins
+    num_coins_to_scan: int = 20  # Number of most volatile coins to scan
     timeframe: str = '5m'  # 5-minute candles
     leverage: int = 10
     leverage_type: str = 'Cross'  # Cross or Isolated
+    auto_trade: bool = False  # Automatically execute trades (False = signals only)
     
     # Risk management
     risk_per_trade: float = 0.02  # 2% of account per trade
@@ -247,6 +250,34 @@ class BinanceFuturesClient:
         """Get exchange trading rules and symbol information"""
         endpoint = '/fapi/v1/exchangeInfo'
         return self._request('GET', endpoint)
+    
+    def get_24hr_ticker(self) -> List[Dict]:
+        """Get 24hr ticker price change statistics for all symbols"""
+        endpoint = '/fapi/v1/ticker/24hr'
+        return self._request('GET', endpoint)
+    
+    def get_all_positions(self) -> List[Dict]:
+        """Get all current positions"""
+        endpoint = '/fapi/v2/positionRisk'
+        positions = self._request('GET', endpoint, signed=True)
+        active_positions = []
+        for position in positions:
+            pos_amt = float(position['positionAmt'])
+            if pos_amt != 0:
+                active_positions.append({
+                    'symbol': position['symbol'],
+                    'position_amt': pos_amt,
+                    'entry_price': float(position['entryPrice']),
+                    'unrealized_pnl': float(position['unRealizedProfit']),
+                    'leverage': int(position['leverage']),
+                    'side': 'LONG' if pos_amt > 0 else 'SHORT'
+                })
+        return active_positions
+    
+    def get_all_open_orders(self) -> List[Dict]:
+        """Get all open orders"""
+        endpoint = '/fapi/v1/openOrders'
+        return self._request('GET', endpoint, signed=True)
 
 
 # ============================================================================
@@ -675,9 +706,13 @@ class PositionManager:
         
         return round(take_profit, 2), round(stop_loss, 2)
     
-    def open_position(self, signal: str, entry_price: float, atr: float, analysis: Dict):
+    def open_position(self, signal: str, entry_price: float, atr: float, analysis: Dict, symbol: str = None):
         """Open new position with DCA entries"""
         try:
+            # Use provided symbol or fall back to config symbol
+            if symbol is None:
+                symbol = self.config.symbol
+            
             # Get account balance
             balance = self.client.get_account_balance()
             logger.info(f"Account balance: ${balance:.2f}")
@@ -697,9 +732,9 @@ class PositionManager:
             entry1_qty = round(quantity * 0.4, self.config.quantity_precision)
             
             # Place market order for immediate entry
-            logger.info(f"Placing {side} market order: {entry1_qty} @ market")
+            logger.info(f"Placing {side} market order for {symbol}: {entry1_qty} @ market")
             order = self.client.place_order(
-                symbol=self.config.symbol,
+                symbol=symbol,
                 side=side,
                 order_type='MARKET',
                 quantity=entry1_qty
@@ -710,7 +745,7 @@ class PositionManager:
             # Send Telegram notification
             reason = f"Signal: {signal}, RSI: {analysis['rsi']:.1f}, BOS: {analysis['bos']}, Sweep: {analysis['liquidity_sweep']}"
             self.notifier.send_trade_alert(
-                'ENTRY 1/4', self.config.symbol, side, entry_price, entry1_qty, reason
+                'ENTRY 1/4', symbol, side, entry_price, entry1_qty, reason
             )
             
             # Calculate DCA levels
@@ -721,9 +756,9 @@ class PositionManager:
             
             for i, dca_price in enumerate(dca_levels, 2):
                 try:
-                    logger.info(f"Placing DCA {i} limit order: {dca_qty} @ ${dca_price}")
+                    logger.info(f"Placing DCA {i} limit order for {symbol}: {dca_qty} @ ${dca_price}")
                     dca_order = self.client.place_order(
-                        symbol=self.config.symbol,
+                        symbol=symbol,
                         side=side,
                         order_type='LIMIT',
                         quantity=dca_qty,
@@ -739,9 +774,9 @@ class PositionManager:
             
             try:
                 tp_side = 'SELL' if signal == 'LONG' else 'BUY'
-                logger.info(f"Placing TP order: {total_qty} @ ${tp_price}")
+                logger.info(f"Placing TP order for {symbol}: {total_qty} @ ${tp_price}")
                 tp_order = self.client.place_order(
-                    symbol=self.config.symbol,
+                    symbol=symbol,
                     side=tp_side,
                     order_type='LIMIT',
                     quantity=total_qty,
@@ -756,9 +791,9 @@ class PositionManager:
             time.sleep(self.config.order_delay)
             
             try:
-                logger.info(f"Placing SL order: {total_qty} @ ${sl_price}")
+                logger.info(f"Placing SL order for {symbol}: {total_qty} @ ${sl_price}")
                 sl_order = self.client.place_order(
-                    symbol=self.config.symbol,
+                    symbol=symbol,
                     side=tp_side,
                     order_type='STOP_MARKET',
                     quantity=total_qty,
@@ -769,7 +804,7 @@ class PositionManager:
             except Exception as e:
                 logger.error(f"Failed to place SL order: {e}")
             
-            logger.info(f"Position opened successfully: {signal} @ ${entry_price:.2f}")
+            logger.info(f"Position opened successfully: {signal} {symbol} @ ${entry_price:.2f}")
             logger.info(f"TP: ${tp_price:.2f}, SL: ${sl_price:.2f}")
             logger.info(f"DCA levels: {dca_levels}")
             
@@ -822,9 +857,13 @@ class ScalpingBot:
             balance = self.client.get_account_balance()
             logger.info(f"Initial balance: ${balance:.2f}")
             
+            mode_str = "Auto-trade ENABLED" if self.config.auto_trade else "Signals only"
+            coin_selection = f"Auto-selecting top {self.config.num_coins_to_scan} volatile coins" if self.config.auto_select_volatile_coins else f"Scanning {len(self.config.symbols_to_scan)} pre-configured pairs"
+            
             self.notifier.send_message(
                 f"🤖 <b>Multi-Symbol Scanner Started</b>\n"
-                f"Scanning: {len(self.config.symbols_to_scan)} pairs\n"
+                f"Mode: {mode_str}\n"
+                f"Coin selection: {coin_selection}\n"
                 f"Leverage: {self.config.leverage_type} {self.config.leverage}x\n"
                 f"Balance: ${balance:.2f}\n"
                 f"Risk per trade: {self.config.risk_per_trade*100}%\n"
@@ -835,13 +874,102 @@ class ScalpingBot:
         except Exception as e:
             logger.error(f"Failed to setup account: {e}")
     
+    def get_most_volatile_symbols(self, num_symbols: int = 20) -> List[str]:
+        """Get most volatile symbols based on 24hr price change percentage"""
+        try:
+            logger.info("Fetching 24hr ticker data to find most volatile symbols...")
+            tickers = self.client.get_24hr_ticker()
+            
+            # Filter USDT pairs and calculate volatility score
+            usdt_pairs = []
+            for ticker in tickers:
+                symbol = ticker['symbol']
+                if symbol.endswith('USDT') and not symbol.startswith('USDT'):
+                    try:
+                        # Volatility score = abs(price change %) + (volume in USDT / 1M)
+                        price_change_pct = abs(float(ticker.get('priceChangePercent', 0)))
+                        volume = float(ticker.get('quoteVolume', 0))
+                        volume_score = volume / 1000000  # Normalize volume
+                        
+                        volatility_score = price_change_pct + (volume_score * 0.1)  # Weight volume 10%
+                        
+                        usdt_pairs.append({
+                            'symbol': symbol,
+                            'volatility_score': volatility_score,
+                            'price_change_pct': price_change_pct,
+                            'volume': volume
+                        })
+                    except (ValueError, KeyError) as e:
+                        continue
+            
+            # Sort by volatility score (highest first)
+            usdt_pairs.sort(key=lambda x: x['volatility_score'], reverse=True)
+            
+            # Get top N symbols
+            top_symbols = [pair['symbol'] for pair in usdt_pairs[:num_symbols]]
+            
+            logger.info(f"Top {len(top_symbols)} volatile symbols:")
+            for i, pair in enumerate(usdt_pairs[:num_symbols], 1):
+                logger.info(f"  {i}. {pair['symbol']}: {pair['price_change_pct']:.2f}% change, "
+                           f"${pair['volume']/1e6:.2f}M volume")
+            
+            return top_symbols
+            
+        except Exception as e:
+            logger.error(f"Error getting volatile symbols: {e}")
+            # Fallback to default symbols
+            return [
+                'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+                'ADAUSDT', 'DOGEUSDT', 'MATICUSDT', 'DOTUSDT', 'AVAXUSDT',
+                'LINKUSDT', 'UNIUSDT', 'ATOMUSDT', 'LTCUSDT', 'NEARUSDT',
+                'APTUSDT', 'ARBUSDT', 'OPUSDT', 'SUIUSDT', 'INJUSDT'
+            ]
+    
+    def get_symbols_with_positions_or_orders(self) -> set:
+        """Get set of symbols that have open positions or orders"""
+        symbols_to_skip = set()
+        
+        try:
+            # Get all positions
+            positions = self.client.get_all_positions()
+            for position in positions:
+                symbols_to_skip.add(position['symbol'])
+                logger.info(f"Skipping {position['symbol']} - has open position")
+            
+            # Get all open orders
+            orders = self.client.get_all_open_orders()
+            for order in orders:
+                symbol = order['symbol']
+                symbols_to_skip.add(symbol)
+                if symbol not in [p['symbol'] for p in positions]:
+                    logger.info(f"Skipping {symbol} - has open orders")
+            
+        except Exception as e:
+            logger.error(f"Error checking positions/orders: {e}")
+        
+        return symbols_to_skip
+    
     def scan_symbols_for_signals(self) -> List[Dict]:
         """Scan multiple symbols and find best trading opportunities"""
         signals = []
         
-        logger.info(f"Scanning {len(self.config.symbols_to_scan)} symbols for trading signals...")
+        # Get symbols to scan
+        if self.config.auto_select_volatile_coins:
+            symbols_to_scan = self.get_most_volatile_symbols(self.config.num_coins_to_scan)
+        else:
+            symbols_to_scan = self.config.symbols_to_scan
         
-        for symbol in self.config.symbols_to_scan:
+        # Get symbols with existing positions/orders to skip
+        symbols_to_skip = self.get_symbols_with_positions_or_orders()
+        
+        # Filter out symbols with positions/orders
+        symbols_to_scan = [s for s in symbols_to_scan if s not in symbols_to_skip]
+        
+        logger.info(f"Scanning {len(symbols_to_scan)} symbols for trading signals...")
+        if symbols_to_skip:
+            logger.info(f"Skipped {len(symbols_to_skip)} symbols with open positions/orders")
+        
+        for symbol in symbols_to_scan:
             try:
                 # Get market data
                 klines = self.client.get_klines(symbol, self.config.timeframe, limit=500)
@@ -880,8 +1008,10 @@ class ScalpingBot:
                         'stop_loss': stop_loss,
                         'score': analysis['signal_score'],
                         'rsi': analysis['rsi'],
+                        'atr': atr,
                         'bos': analysis['bos'],
-                        'liquidity_sweep': analysis['liquidity_sweep']
+                        'liquidity_sweep': analysis['liquidity_sweep'],
+                        'analysis': analysis
                     }
                     
                     signals.append(signal_data)
@@ -901,13 +1031,14 @@ class ScalpingBot:
         return top_signals
     
     def send_signals_to_telegram(self, signals: List[Dict]):
-        """Send formatted signals to Telegram"""
+        """Send formatted signals to Telegram and optionally execute trades"""
         if not signals:
             logger.info("No signals to send")
             return
         
         for signal_data in signals:
             try:
+                # Send signal to Telegram
                 self.notifier.send_signal_alert(
                     symbol=signal_data['symbol'],
                     direction=signal_data['direction'],
@@ -920,9 +1051,45 @@ class ScalpingBot:
                     score=signal_data['score']
                 )
                 logger.info(f"Signal sent for {signal_data['symbol']}")
+                
+                # Execute trade if auto_trade is enabled
+                if self.config.auto_trade:
+                    logger.info(f"Auto-trade enabled, executing trade for {signal_data['symbol']}")
+                    self.execute_signal(signal_data)
+                
                 time.sleep(1)  # Small delay between messages
+                
             except Exception as e:
                 logger.error(f"Error sending signal for {signal_data['symbol']}: {e}")
+    
+    def execute_signal(self, signal_data: Dict):
+        """Execute a trading signal automatically"""
+        try:
+            symbol = signal_data['symbol']
+            direction = signal_data['direction']
+            
+            # Set leverage for the symbol
+            try:
+                self.client.set_leverage(symbol, self.config.leverage)
+                logger.info(f"Set leverage {self.config.leverage}x for {symbol}")
+            except Exception as e:
+                logger.warning(f"Could not set leverage for {symbol}: {e}")
+            
+            # Execute the trade using position manager
+            self.position_manager.open_position(
+                signal=direction,
+                entry_price=signal_data['market_price'],
+                atr=signal_data['atr'],
+                analysis=signal_data['analysis'],
+                symbol=symbol  # Pass symbol explicitly
+            )
+            
+            logger.info(f"✅ Trade executed successfully for {symbol}")
+            self.notifier.send_message(f"✅ Trade executed: {direction} {symbol}")
+            
+        except Exception as e:
+            logger.error(f"Failed to execute trade for {signal_data['symbol']}: {e}")
+            self.notifier.send_message(f"❌ Trade execution failed for {signal_data['symbol']}: {e}")
     
     def run_cycle(self):
         """Run one trading cycle - scan multiple symbols and send signals"""
@@ -1063,9 +1230,14 @@ def main():
     
     # Show configuration
     print(f"\n📊 Configuration:")
-    print(f"  Symbols to scan: {len(config.symbols_to_scan)} pairs")
+    print(f"  Auto-select volatile coins: {config.auto_select_volatile_coins}")
+    if config.auto_select_volatile_coins:
+        print(f"  Number of coins to scan: {config.num_coins_to_scan}")
+    else:
+        print(f"  Symbols to scan: {len(config.symbols_to_scan)} pairs")
     print(f"  Timeframe: {config.timeframe}")
     print(f"  Leverage: {config.leverage_type} {config.leverage}x")
+    print(f"  Auto-trade: {'ENABLED' if config.auto_trade else 'DISABLED (signals only)'}")
     print(f"  Risk per trade: {config.risk_per_trade*100}%")
     print(f"  Max signals per scan: {config.max_signals_per_scan}")
     print(f"  Signal threshold: {config.signal_threshold} points")
@@ -1074,18 +1246,24 @@ def main():
     print(f"  Scan Interval: {config.scan_interval}s")
     print(f"  Telegram: {'Enabled' if config.telegram_token else 'Disabled'}")
     
-    # Show symbols being scanned
-    print(f"\n📈 Scanning these pairs:")
-    for i in range(0, len(config.symbols_to_scan), 5):
-        print(f"  {', '.join(config.symbols_to_scan[i:i+5])}")
+    # Show trading mode
+    if config.auto_select_volatile_coins:
+        print(f"\n📈 Trading Mode:")
+        print(f"  Bot will automatically select the {config.num_coins_to_scan} most volatile coins")
+        print(f"  Selection refreshes every scan cycle")
+        print(f"  Coins with open positions/orders are automatically skipped")
     
     # Confirm start
     print("\n⚠️  WARNING: This bot will scan and send signals!")
     print("Note:")
-    print("  1. Bot will scan multiple pairs for best opportunities")
-    print("  2. Signals will be sent to Telegram with entry/TP/SL levels")
-    print("  3. You can manually execute trades or use auto-trading")
-    print("  4. Test on Binance Testnet first for auto-trading")
+    print("  1. Bot scans for best opportunities every 60 seconds")
+    print("  2. Automatically selects most volatile coins if enabled")
+    print("  3. Skips coins with existing positions/orders")
+    print("  4. Signals sent to Telegram with entry/TP/SL levels")
+    if config.auto_trade:
+        print("  5. ⚠️  AUTO-TRADE ENABLED - Will execute trades automatically!")
+    else:
+        print("  5. AUTO-TRADE DISABLED - Signals only (manual execution)")
     
     response = input("\nType 'START' to begin trading: ")
     if response.upper() != 'START':
