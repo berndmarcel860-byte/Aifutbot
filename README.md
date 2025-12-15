@@ -102,6 +102,16 @@ export TELEGRAM_BOT_TOKEN="your_telegram_bot_token"  # Optional
 export TELEGRAM_CHAT_ID="your_telegram_chat_id"      # Optional
 ```
 
+**⚠️ Important:** Make sure to actually replace the placeholder text with your real credentials!
+
+**Verify your setup:**
+```bash
+# Run the environment check script
+python check_env.py
+```
+
+**Need help?** See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions and troubleshooting.
+
 ## ⚙️ Configuration
 
 The bot can be configured by modifying the `BotConfig` class in `ai_scalping_bot.py`:
