@@ -37,12 +37,15 @@ class BotConfig:
     
     # Trading parameters
     symbol: str = 'BTCUSDT'
+    symbols_to_scan: List[str] = None  # Will be set to popular futures pairs
     timeframe: str = '5m'  # 5-minute candles
     leverage: int = 10
+    leverage_type: str = 'Cross'  # Cross or Isolated
     
     # Risk management
     risk_per_trade: float = 0.02  # 2% of account per trade
     max_positions: int = 3
+    max_signals_per_scan: int = 5  # Maximum signals to send per scan
     
     # DCA parameters (Fibonacci levels)
     dca_levels: List[float] = None  # Will be set to [0.236, 0.382, 0.5, 0.618]
@@ -78,6 +81,14 @@ class BotConfig:
     def __post_init__(self):
         if self.dca_levels is None:
             self.dca_levels = [0.236, 0.382, 0.5, 0.618]
+        if self.symbols_to_scan is None:
+            # Popular Binance Futures pairs with good liquidity
+            self.symbols_to_scan = [
+                'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+                'ADAUSDT', 'DOGEUSDT', 'MATICUSDT', 'DOTUSDT', 'AVAXUSDT',
+                'LINKUSDT', 'UNIUSDT', 'ATOMUSDT', 'LTCUSDT', 'NEARUSDT',
+                'APTUSDT', 'ARBUSDT', 'OPUSDT', 'SUIUSDT', 'INJUSDT'
+            ]
 
 
 # ============================================================================
@@ -231,6 +242,11 @@ class BinanceFuturesClient:
         params = {'symbol': symbol}
         data = self._request('GET', endpoint, params=params)
         return float(data['markPrice'])
+    
+    def get_exchange_info(self) -> Dict:
+        """Get exchange trading rules and symbol information"""
+        endpoint = '/fapi/v1/exchangeInfo'
+        return self._request('GET', endpoint)
 
 
 # ============================================================================
@@ -288,6 +304,34 @@ class TelegramNotifier:
             f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%)\n"
             f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
+        self.send_message(message)
+    
+    def send_signal_alert(self, symbol: str, direction: str, market_price: float,
+                         leverage: int, leverage_type: str, entries: List[float],
+                         take_profit: float, stop_loss: float, score: int = None):
+        """Send formatted trading signal alert"""
+        message = (
+            f"⚡⚡ <b>{symbol}</b> ⚡⚡\n"
+            f"Exchange: Binance Futures\n"
+            f"Direction: {direction}\n"
+            f"Market Price: ${market_price:.4f}\n\n"
+            f"Leverage: {leverage_type} {leverage}x\n\n"
+            f"<b>Entries:</b>\n"
+        )
+        
+        for i, entry in enumerate(entries, 1):
+            message += f"{i}. ${entry:.4f}\n"
+        
+        message += (
+            f"\n<b>Take Profits:</b>\n"
+            f"1. ${take_profit:.4f}\n\n"
+            f"<b>Stop Loss:</b>\n"
+            f"1. ${stop_loss:.4f}"
+        )
+        
+        if score:
+            message += f"\n\n📊 Signal Score: {score} points"
+        
         self.send_message(message)
 
 
@@ -492,13 +536,14 @@ class SignalGenerator:
             'pullback': pullback
         }
         
-        # Generate signal
-        signal = self._generate_signal(analysis)
+        # Generate signal and score
+        signal, score = self._generate_signal(analysis)
+        analysis['signal_score'] = score
         
         return signal, analysis
     
-    def _generate_signal(self, analysis: Dict) -> Optional[str]:
-        """Generate trading signal based on analysis"""
+    def _generate_signal(self, analysis: Dict) -> Tuple[Optional[str], int]:
+        """Generate trading signal based on analysis. Returns (signal, score)"""
         price = analysis['price']
         rsi = analysis['rsi']
         ema_fast = analysis['ema_fast']
@@ -570,11 +615,11 @@ class SignalGenerator:
         
         # Use configurable threshold for signal generation
         if long_score >= self.config.signal_threshold and long_score > short_score:
-            return 'LONG'
+            return 'LONG', long_score
         elif short_score >= self.config.signal_threshold and short_score > long_score:
-            return 'SHORT'
+            return 'SHORT', short_score
         
-        return None
+        return None, max(long_score, short_score)
 
 
 # ============================================================================
@@ -773,27 +818,132 @@ class ScalpingBot:
     def setup_account(self):
         """Setup account settings"""
         try:
-            # Set leverage
-            logger.info(f"Setting leverage to {self.config.leverage}x")
-            self.client.set_leverage(self.config.symbol, self.config.leverage)
-            
             # Get initial balance
             balance = self.client.get_account_balance()
             logger.info(f"Initial balance: ${balance:.2f}")
             
             self.notifier.send_message(
-                f"🤖 <b>Bot Started</b>\n"
-                f"Symbol: {self.config.symbol}\n"
-                f"Leverage: {self.config.leverage}x\n"
+                f"🤖 <b>Multi-Symbol Scanner Started</b>\n"
+                f"Scanning: {len(self.config.symbols_to_scan)} pairs\n"
+                f"Leverage: {self.config.leverage_type} {self.config.leverage}x\n"
                 f"Balance: ${balance:.2f}\n"
-                f"Risk per trade: {self.config.risk_per_trade*100}%"
+                f"Risk per trade: {self.config.risk_per_trade*100}%\n"
+                f"Max signals: {self.config.max_signals_per_scan} per scan\n"
+                f"Scan interval: {self.config.scan_interval}s"
             )
             
         except Exception as e:
             logger.error(f"Failed to setup account: {e}")
     
+    def scan_symbols_for_signals(self) -> List[Dict]:
+        """Scan multiple symbols and find best trading opportunities"""
+        signals = []
+        
+        logger.info(f"Scanning {len(self.config.symbols_to_scan)} symbols for trading signals...")
+        
+        for symbol in self.config.symbols_to_scan:
+            try:
+                # Get market data
+                klines = self.client.get_klines(symbol, self.config.timeframe, limit=500)
+                
+                # Analyze market
+                signal, analysis = self.signal_generator.analyze_market(klines)
+                
+                if signal:
+                    # Calculate entry levels and TP/SL
+                    current_price = analysis['price']
+                    atr = analysis['atr']
+                    
+                    # Calculate DCA entry prices
+                    entries = [current_price]  # First entry at market
+                    for level in self.config.dca_levels[:3]:  # Only use first 3 DCA levels for signal
+                        if signal == 'LONG':
+                            entry_price = current_price - (atr * level * 2)
+                        else:
+                            entry_price = current_price + (atr * level * 2)
+                        entries.append(entry_price)
+                    
+                    # Calculate TP and SL
+                    if signal == 'LONG':
+                        take_profit = current_price + (atr * self.config.tp_atr_multiplier)
+                        stop_loss = current_price - (atr * self.config.sl_atr_multiplier)
+                    else:
+                        take_profit = current_price - (atr * self.config.tp_atr_multiplier)
+                        stop_loss = current_price + (atr * self.config.sl_atr_multiplier)
+                    
+                    signal_data = {
+                        'symbol': symbol,
+                        'direction': signal,
+                        'market_price': current_price,
+                        'entries': entries,
+                        'take_profit': take_profit,
+                        'stop_loss': stop_loss,
+                        'score': analysis['signal_score'],
+                        'rsi': analysis['rsi'],
+                        'bos': analysis['bos'],
+                        'liquidity_sweep': analysis['liquidity_sweep']
+                    }
+                    
+                    signals.append(signal_data)
+                    logger.info(f"✓ Signal found for {symbol}: {signal} (Score: {analysis['signal_score']})")
+                
+            except Exception as e:
+                logger.error(f"Error scanning {symbol}: {e}")
+                continue
+        
+        # Sort by score (highest first)
+        signals.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Return top signals
+        top_signals = signals[:self.config.max_signals_per_scan]
+        logger.info(f"Found {len(signals)} total signals, sending top {len(top_signals)}")
+        
+        return top_signals
+    
+    def send_signals_to_telegram(self, signals: List[Dict]):
+        """Send formatted signals to Telegram"""
+        if not signals:
+            logger.info("No signals to send")
+            return
+        
+        for signal_data in signals:
+            try:
+                self.notifier.send_signal_alert(
+                    symbol=signal_data['symbol'],
+                    direction=signal_data['direction'],
+                    market_price=signal_data['market_price'],
+                    leverage=self.config.leverage,
+                    leverage_type=self.config.leverage_type,
+                    entries=signal_data['entries'],
+                    take_profit=signal_data['take_profit'],
+                    stop_loss=signal_data['stop_loss'],
+                    score=signal_data['score']
+                )
+                logger.info(f"Signal sent for {signal_data['symbol']}")
+                time.sleep(1)  # Small delay between messages
+            except Exception as e:
+                logger.error(f"Error sending signal for {signal_data['symbol']}: {e}")
+    
     def run_cycle(self):
-        """Run one trading cycle"""
+        """Run one trading cycle - scan multiple symbols and send signals"""
+        try:
+            # Scan all symbols for trading signals
+            logger.info("Starting multi-symbol scan...")
+            signals = self.scan_symbols_for_signals()
+            
+            # Send signals to Telegram
+            if signals:
+                logger.info(f"Found {len(signals)} high-quality signals")
+                self.send_signals_to_telegram(signals)
+            else:
+                logger.info("No signals found in this scan")
+            
+        except Exception as e:
+            logger.error(f"Error in trading cycle: {e}", exc_info=True)
+            self.notifier.send_message(f"❌ Error in trading cycle: {e}")
+    
+    def run_cycle_single_symbol(self):
+        """Run one trading cycle for single symbol (legacy mode)"""
         try:
             # Check for existing positions to prevent duplicates
             if self.check_existing_positions():
@@ -832,6 +982,7 @@ class ScalpingBot:
             
             logger.info(f"Market analysis - Price: ${analysis['price']:.2f}, "
                        f"RSI: {analysis['rsi']:.1f}, "
+                       f"Score: {analysis['signal_score']}, "
                        f"BOS: {analysis['bos']}, "
                        f"Sweep: {analysis['liquidity_sweep']}, "
                        f"Pullback: {analysis['pullback']}")
@@ -912,21 +1063,29 @@ def main():
     
     # Show configuration
     print(f"\n📊 Configuration:")
-    print(f"  Symbol: {config.symbol}")
+    print(f"  Symbols to scan: {len(config.symbols_to_scan)} pairs")
     print(f"  Timeframe: {config.timeframe}")
-    print(f"  Leverage: {config.leverage}x")
+    print(f"  Leverage: {config.leverage_type} {config.leverage}x")
     print(f"  Risk per trade: {config.risk_per_trade*100}%")
+    print(f"  Max signals per scan: {config.max_signals_per_scan}")
+    print(f"  Signal threshold: {config.signal_threshold} points")
     print(f"  DCA Levels: {config.dca_levels}")
     print(f"  TP/SL Multipliers: {config.tp_atr_multiplier}x / {config.sl_atr_multiplier}x ATR")
     print(f"  Scan Interval: {config.scan_interval}s")
     print(f"  Telegram: {'Enabled' if config.telegram_token else 'Disabled'}")
     
+    # Show symbols being scanned
+    print(f"\n📈 Scanning these pairs:")
+    for i in range(0, len(config.symbols_to_scan), 5):
+        print(f"  {', '.join(config.symbols_to_scan[i:i+5])}")
+    
     # Confirm start
-    print("\n⚠️  WARNING: This bot will trade with real funds!")
-    print("Make sure you have:")
-    print("  1. Tested on Binance Testnet first")
-    print("  2. Set appropriate risk limits")
-    print("  3. Monitored initial trades closely")
+    print("\n⚠️  WARNING: This bot will scan and send signals!")
+    print("Note:")
+    print("  1. Bot will scan multiple pairs for best opportunities")
+    print("  2. Signals will be sent to Telegram with entry/TP/SL levels")
+    print("  3. You can manually execute trades or use auto-trading")
+    print("  4. Test on Binance Testnet first for auto-trading")
     
     response = input("\nType 'START' to begin trading: ")
     if response.upper() != 'START':

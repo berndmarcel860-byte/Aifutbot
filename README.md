@@ -1,8 +1,13 @@
 # AI Scalping Bot for Binance Futures
 
-A professional Python AI scalping bot for Binance Futures that uses high-probability technical indicators and price-action patterns to execute automated trades with advanced risk management.
+A professional Python AI scalping bot for Binance Futures that scans multiple trading pairs, uses high-probability technical indicators and price-action patterns to identify best trading opportunities, and sends formatted signals to Telegram.
 
 ## 🎯 Features
+
+### 🔍 Multi-Symbol Scanner
+- **Scans 20+ Popular Pairs**: Automatically analyzes BTC, ETH, BNB, SOL, XRP, ADA, DOGE, MATIC, DOT, AVAX, LINK, UNI, ATOM, LTC, NEAR, APT, ARB, OP, SUI, INJ and more
+- **Smart Signal Ranking**: Scores each opportunity and sends only the best signals (top 5 by default)
+- **Continuous Monitoring**: Scans all pairs every 60 seconds for new opportunities
 
 ### Technical Indicators
 - **EMA (Exponential Moving Average)**: Fast (9) and Slow (21) periods for trend identification
@@ -25,12 +30,30 @@ A professional Python AI scalping bot for Binance Futures that uses high-probabi
 - **Duplicate Order Prevention**: Checks existing positions and open orders
 - **Dynamic Risk Management**: 2% risk per trade with leverage support
 
-### Real-Time Alerts
-- **Telegram Integration**: Receive instant notifications for:
-  - Trade entries (all DCA levels)
-  - Position updates
-  - PnL tracking
-  - Errors and warnings
+### 📱 Formatted Telegram Signals
+Receive beautifully formatted trading signals:
+```
+⚡⚡ BTCUSDT ⚡⚡
+Exchange: Binance Futures
+Direction: LONG
+Market Price: $43,250.00
+
+Leverage: Cross 10x
+
+Entries:
+1. $43,250.00
+2. $43,150.00
+3. $43,100.00
+4. $43,050.00
+
+Take Profits:
+1. $43,750.00
+
+Stop Loss:
+1. $42,900.00
+
+📊 Signal Score: 8 points
+```
 
 ## 📋 Requirements
 
@@ -67,9 +90,14 @@ The bot can be configured by modifying the `BotConfig` class in `ai_scalping_bot
 @dataclass
 class BotConfig:
     # Trading parameters
-    symbol: str = 'BTCUSDT'           # Trading pair
+    symbols_to_scan: List[str] = None  # Auto-populated with 20 popular pairs
     timeframe: str = '5m'              # Candle timeframe
     leverage: int = 10                 # Leverage (1-125)
+    leverage_type: str = 'Cross'       # Cross or Isolated
+    
+    # Signal filtering
+    max_signals_per_scan: int = 5      # Top N signals to send
+    signal_threshold: int = 6          # Minimum score (0-12+)
     
     # Risk management
     risk_per_trade: float = 0.02       # 2% risk per trade
@@ -92,6 +120,9 @@ class BotConfig:
     scan_interval: int = 60            # Seconds between market scans
 ```
 
+### Default Scanned Symbols (20 pairs)
+BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, ADAUSDT, DOGEUSDT, MATICUSDT, DOTUSDT, AVAXUSDT, LINKUSDT, UNIUSDT, ATOMUSDT, LTCUSDT, NEARUSDT, APTUSDT, ARBUSDT, OPUSDT, SUIUSDT, INJUSDT
+
 ## 🎮 Usage
 
 ### Running the Bot
@@ -100,11 +131,17 @@ class BotConfig:
 python ai_scalping_bot.py
 ```
 
+The bot will:
+1. Scan all configured symbols every 60 seconds
+2. Score each opportunity (0-12+ points)
+3. Send top 5 signals to Telegram with formatted details
+4. Continue monitoring for new opportunities
+
 ### First-Time Setup
 
-1. **Test on Binance Testnet first**: Use testnet API keys to verify functionality
-2. **Start with low leverage**: Begin with 1-3x leverage
-3. **Monitor initial trades**: Watch the first few trades closely
+1. **Configure Telegram**: Set up bot and get chat ID for receiving signals
+2. **Test the scanner**: Run without trading to see signal quality
+3. **Adjust parameters**: Tune signal_threshold and max_signals_per_scan
 4. **Adjust parameters**: Fine-tune based on market conditions
 
 ### Safety Checks
