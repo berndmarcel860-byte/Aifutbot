@@ -65,8 +65,15 @@ class BotConfig:
     bos_lookback: int = 20
     liquidity_sweep_threshold: float = 0.001  # 0.1%
     
+    # Signal generation
+    signal_threshold: int = 6  # Minimum score for signal generation
+    
     # Operational
     scan_interval: int = 60  # seconds
+    order_delay: int = 1  # seconds between order placements
+    position_update_frequency: int = 10  # cycles between position updates
+    error_retry_delay: int = 60  # seconds to wait after error
+    quantity_precision: int = 3  # decimal places for order quantities
     
     def __post_init__(self):
         if self.dca_levels is None:
@@ -561,12 +568,10 @@ class SignalGenerator:
         if pullback == 'BEARISH':
             short_score += 1
         
-        # Threshold for signal generation (need at least 6 points)
-        SIGNAL_THRESHOLD = 6
-        
-        if long_score >= SIGNAL_THRESHOLD and long_score > short_score:
+        # Use configurable threshold for signal generation
+        if long_score >= self.config.signal_threshold and long_score > short_score:
             return 'LONG'
-        elif short_score >= SIGNAL_THRESHOLD and short_score > long_score:
+        elif short_score >= self.config.signal_threshold and short_score > long_score:
             return 'SHORT'
         
         return None
@@ -590,8 +595,8 @@ class PositionManager:
         price_diff = abs(entry_price - stop_loss)
         quantity = risk_amount / price_diff
         
-        # Round to appropriate precision (0.001 for most futures)
-        quantity = round(quantity, 3)
+        # Round to configured precision
+        quantity = round(quantity, self.config.quantity_precision)
         
         return quantity
     
@@ -644,7 +649,7 @@ class PositionManager:
                 return
             
             # Entry 1: Main entry (40% of total)
-            entry1_qty = round(quantity * 0.4, 3)
+            entry1_qty = round(quantity * 0.4, self.config.quantity_precision)
             
             # Place market order for immediate entry
             logger.info(f"Placing {side} market order: {entry1_qty} @ market")
@@ -667,7 +672,7 @@ class PositionManager:
             dca_levels = self.calculate_dca_levels(entry_price, signal, atr)
             
             # Place DCA limit orders (20% each)
-            dca_qty = round(quantity * 0.2, 3)
+            dca_qty = round(quantity * 0.2, self.config.quantity_precision)
             
             for i, dca_price in enumerate(dca_levels, 2):
                 try:
@@ -684,7 +689,7 @@ class PositionManager:
                     logger.error(f"Failed to place DCA {i} order: {e}")
             
             # Place Take Profit order (reduce only)
-            time.sleep(1)  # Small delay
+            time.sleep(self.config.order_delay)
             total_qty = quantity
             
             try:
@@ -703,7 +708,7 @@ class PositionManager:
                 logger.error(f"Failed to place TP order: {e}")
             
             # Place Stop Loss order (reduce only)
-            time.sleep(1)
+            time.sleep(self.config.order_delay)
             
             try:
                 logger.info(f"Placing SL order: {total_qty} @ ${sl_price}")
@@ -803,12 +808,12 @@ class ScalpingBot:
                     
                     logger.info(f"Position PnL: ${pnl:.2f} ({pnl_pct:.2f}%)")
                     
-                    # Send periodic updates (every 10 cycles = ~10 minutes)
+                    # Send periodic updates
                     if not hasattr(self, 'update_counter'):
                         self.update_counter = 0
                     
                     self.update_counter += 1
-                    if self.update_counter >= 10:
+                    if self.update_counter >= self.config.position_update_frequency:
                         self.notifier.send_position_update(self.config.symbol, pnl, pnl_pct)
                         self.update_counter = 0
                 
@@ -875,7 +880,7 @@ class ScalpingBot:
                 break
             except Exception as e:
                 logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
-                time.sleep(60)  # Wait a minute before retrying
+                time.sleep(self.config.error_retry_delay)
 
 
 # ============================================================================
