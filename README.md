@@ -205,6 +205,22 @@ class BotConfig:
 - Skips coins that already have open positions or orders
 - Prevents duplicate positions on the same coin
 
+**Symbol Blacklist:**
+- Create a `blacklist.txt` file to exclude specific symbols from signal generation
+- Add symbols one per line (e.g., `ETHUSDT`, `BTCUSDT`)
+- Lines starting with `#` are treated as comments
+- The bot automatically loads and applies the blacklist on every scan
+- Useful for avoiding pairs you don't want to trade
+
+Example `blacklist.txt`:
+```
+# Blacklist for Trading Symbols
+# Add symbols one per line
+ETHUSDT
+BTCUSDT
+# BNBUSDT
+```
+
 ## 🎮 Usage
 
 ### Running the Bot

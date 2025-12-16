@@ -90,6 +90,7 @@ class BotConfig:
     position_update_frequency: int = 10  # cycles between position updates
     error_retry_delay: int = 60  # seconds to wait after error
     quantity_precision: int = 3  # decimal places for order quantities
+    blacklist_file: str = 'blacklist.txt'  # File containing symbols to exclude
     
     def __post_init__(self):
         if self.dca_levels is None:
@@ -980,6 +981,29 @@ class ScalpingBot:
         
         logger.info("Scalping Bot initialized")
     
+    def load_blacklist(self) -> List[str]:
+        """Load blacklisted symbols from file"""
+        blacklist = []
+        try:
+            if os.path.exists(self.config.blacklist_file):
+                with open(self.config.blacklist_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip comments and empty lines
+                        if line and not line.startswith('#'):
+                            blacklist.append(line.upper())
+                
+                if blacklist:
+                    logger.info(f"Loaded {len(blacklist)} symbols from blacklist: {', '.join(blacklist)}")
+                else:
+                    logger.info("Blacklist file exists but is empty")
+            else:
+                logger.info(f"Blacklist file '{self.config.blacklist_file}' not found, no symbols blacklisted")
+        except Exception as e:
+            logger.error(f"Error loading blacklist: {e}")
+        
+        return blacklist
+    
     def check_existing_positions(self) -> bool:
         """Check if there are existing positions or orders"""
         try:
@@ -1129,6 +1153,15 @@ class ScalpingBot:
             symbols_to_scan = self.get_most_volatile_symbols(self.config.num_coins_to_scan)
         else:
             symbols_to_scan = self.config.symbols_to_scan
+        
+        # Load blacklist and filter out blacklisted symbols
+        blacklist = self.load_blacklist()
+        if blacklist:
+            symbols_before = len(symbols_to_scan)
+            symbols_to_scan = [s for s in symbols_to_scan if s not in blacklist]
+            blacklisted_count = symbols_before - len(symbols_to_scan)
+            if blacklisted_count > 0:
+                logger.info(f"Filtered out {blacklisted_count} blacklisted symbols")
         
         # Get symbols with existing positions/orders to skip
         symbols_to_skip = self.get_symbols_with_positions_or_orders()

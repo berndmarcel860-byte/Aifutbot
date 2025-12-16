@@ -1,0 +1,12 @@
+# Blacklist for Trading Symbols
+# Add symbols (one per line) that you want to exclude from signal generation
+# Lines starting with # are comments and will be ignored
+# Empty lines are also ignored
+
+# Example blacklisted symbols:
+ETHUSDT
+BTCUSDT
+
+# Add your own symbols below (format: SYMBOLUSDT)
+# BNBUSDT
+# SOLUSDT
