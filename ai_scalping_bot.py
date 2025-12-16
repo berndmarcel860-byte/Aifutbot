@@ -476,6 +476,91 @@ class TechnicalIndicators:
         upper_band = middle_band + (std * std_dev)
         lower_band = middle_band - (std * std_dev)
         return upper_band, middle_band, lower_band
+    
+    @staticmethod
+    def macd(data: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """
+        MACD (Moving Average Convergence Divergence)
+        Returns (macd_line, signal_line, histogram)
+        """
+        ema_fast = data.ewm(span=fast, adjust=False).mean()
+        ema_slow = data.ewm(span=slow, adjust=False).mean()
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+        histogram = macd_line - signal_line
+        return macd_line, signal_line, histogram
+    
+    @staticmethod
+    def stochastic(high: pd.Series, low: pd.Series, close: pd.Series, k_period: int = 14, d_period: int = 3) -> Tuple[pd.Series, pd.Series]:
+        """
+        Stochastic Oscillator
+        Returns (%K, %D)
+        """
+        lowest_low = low.rolling(window=k_period).min()
+        highest_high = high.rolling(window=k_period).max()
+        k_percent = 100 * ((close - lowest_low) / (highest_high - lowest_low))
+        d_percent = k_percent.rolling(window=d_period).mean()
+        return k_percent, d_percent
+    
+    @staticmethod
+    def adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+        """
+        ADX (Average Directional Index) - Measures trend strength
+        Returns ADX value (0-100, >25 indicates strong trend)
+        """
+        # Calculate +DM and -DM
+        high_diff = high.diff()
+        low_diff = -low.diff()
+        
+        plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
+        minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
+        
+        # Calculate ATR
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=period).mean()
+        
+        # Calculate +DI and -DI
+        plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
+        minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
+        
+        # Calculate DX and ADX
+        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        adx = dx.rolling(window=period).mean()
+        
+        return adx
+    
+    @staticmethod
+    def ichimoku_cloud(high: pd.Series, low: pd.Series, close: pd.Series) -> Tuple[pd.Series, pd.Series]:
+        """
+        Simplified Ichimoku Cloud
+        Returns (tenkan_sen, kijun_sen) - conversion and base lines
+        """
+        # Tenkan-sen (Conversion Line): 9-period
+        tenkan_high = high.rolling(window=9).max()
+        tenkan_low = low.rolling(window=9).min()
+        tenkan_sen = (tenkan_high + tenkan_low) / 2
+        
+        # Kijun-sen (Base Line): 26-period
+        kijun_high = high.rolling(window=26).max()
+        kijun_low = low.rolling(window=26).min()
+        kijun_sen = (kijun_high + kijun_low) / 2
+        
+        return tenkan_sen, kijun_sen
+    
+    @staticmethod
+    def cmf(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, period: int = 20) -> pd.Series:
+        """
+        CMF (Chaikin Money Flow) - Volume-weighted accumulation/distribution
+        Positive values indicate buying pressure, negative indicate selling pressure
+        """
+        mf_multiplier = ((close - low) - (high - close)) / (high - low)
+        mf_multiplier = mf_multiplier.fillna(0)  # Handle division by zero
+        mf_volume = mf_multiplier * volume
+        cmf = mf_volume.rolling(window=period).sum() / volume.rolling(window=period).sum()
+        return cmf
 
 
 # ============================================================================
@@ -687,6 +772,13 @@ class SignalGenerator:
         volume_ma = self.indicators.volume_ma(df['volume'], self.config.volume_ma_period)
         bb_upper, bb_middle, bb_lower = self.indicators.bollinger_bands(df['close'], period=20, std_dev=2.0)
         
+        # New advanced indicators
+        macd_line, macd_signal, macd_histogram = self.indicators.macd(df['close'])
+        stoch_k, stoch_d = self.indicators.stochastic(df['high'], df['low'], df['close'])
+        adx = self.indicators.adx(df['high'], df['low'], df['close'])
+        tenkan_sen, kijun_sen = self.indicators.ichimoku_cloud(df['high'], df['low'], df['close'])
+        cmf = self.indicators.cmf(df['high'], df['low'], df['close'], df['volume'])
+        
         # Current values
         current_price = df['close'].iloc[-1]
         current_rsi = rsi.iloc[-1]
@@ -699,6 +791,17 @@ class SignalGenerator:
         bb_upper_val = bb_upper.iloc[-1]
         bb_middle_val = bb_middle.iloc[-1]
         bb_lower_val = bb_lower.iloc[-1]
+        
+        # New indicator current values
+        macd_line_val = macd_line.iloc[-1]
+        macd_signal_val = macd_signal.iloc[-1]
+        macd_histogram_val = macd_histogram.iloc[-1]
+        stoch_k_val = stoch_k.iloc[-1]
+        stoch_d_val = stoch_d.iloc[-1]
+        adx_val = adx.iloc[-1]
+        tenkan_val = tenkan_sen.iloc[-1]
+        kijun_val = kijun_sen.iloc[-1]
+        cmf_val = cmf.iloc[-1]
         
         # Detect patterns
         bos = self.pattern_analyzer.detect_break_of_structure(df, self.config.bos_lookback)
@@ -720,7 +823,17 @@ class SignalGenerator:
             'bb_lower': bb_lower_val,
             'bos': bos,
             'liquidity_sweep': liquidity_sweep,
-            'pullback': pullback
+            'pullback': pullback,
+            # New advanced indicators
+            'macd_line': macd_line_val,
+            'macd_signal': macd_signal_val,
+            'macd_histogram': macd_histogram_val,
+            'stoch_k': stoch_k_val,
+            'stoch_d': stoch_d_val,
+            'adx': adx_val,
+            'tenkan': tenkan_val,
+            'kijun': kijun_val,
+            'cmf': cmf_val
         }
         
         # Generate signal and score (pass market direction if available)
@@ -745,6 +858,17 @@ class SignalGenerator:
         bos = analysis['bos']
         liquidity_sweep = analysis['liquidity_sweep']
         pullback = analysis['pullback']
+        
+        # New advanced indicators
+        macd_line = analysis['macd_line']
+        macd_signal = analysis['macd_signal']
+        macd_histogram = analysis['macd_histogram']
+        stoch_k = analysis['stoch_k']
+        stoch_d = analysis['stoch_d']
+        adx = analysis['adx']
+        tenkan = analysis['tenkan']
+        kijun = analysis['kijun']
+        cmf = analysis['cmf']
         
         # Calculate price position within Bollinger Bands
         bb_range = bb_upper - bb_lower
@@ -784,6 +908,32 @@ class SignalGenerator:
             long_score += 2
             logger.debug(f"Price at lower Bollinger Band ({bb_position:.2f}) with RSI {rsi:.1f} - potential oversold bounce")
         
+        # MACD bullish signals
+        if macd_line > macd_signal and macd_histogram > 0:
+            long_score += 2  # MACD crossover and positive momentum
+        elif macd_line > macd_signal:
+            long_score += 1  # MACD crossover
+        
+        # Stochastic oversold bounce
+        if stoch_k < 20 and stoch_d < 20:
+            long_score += 2  # Strong oversold
+        elif stoch_k < 30:
+            long_score += 1  # Mild oversold
+        
+        # ADX trend strength (only add if strong trend exists)
+        if adx > 25:
+            long_score += 1  # Strong trend confirmation
+        
+        # Ichimoku bullish signal (Tenkan above Kijun = bullish)
+        if tenkan > kijun:
+            long_score += 1
+        
+        # CMF buying pressure
+        if cmf > 0.1:
+            long_score += 2  # Strong buying pressure
+        elif cmf > 0:
+            long_score += 1  # Mild buying pressure
+        
         # Volume confirmation
         if volume > volume_ma * 1.2:
             long_score += 1
@@ -822,6 +972,32 @@ class SignalGenerator:
         if at_upper_band and rsi > 60:
             short_score += 2
             logger.debug(f"Price at upper Bollinger Band ({bb_position:.2f}) with RSI {rsi:.1f} - potential overbought rejection")
+        
+        # MACD bearish signals
+        if macd_line < macd_signal and macd_histogram < 0:
+            short_score += 2  # MACD crossover and negative momentum
+        elif macd_line < macd_signal:
+            short_score += 1  # MACD crossover
+        
+        # Stochastic overbought rejection
+        if stoch_k > 80 and stoch_d > 80:
+            short_score += 2  # Strong overbought
+        elif stoch_k > 70:
+            short_score += 1  # Mild overbought
+        
+        # ADX trend strength (only add if strong trend exists)
+        if adx > 25:
+            short_score += 1  # Strong trend confirmation
+        
+        # Ichimoku bearish signal (Tenkan below Kijun = bearish)
+        if tenkan < kijun:
+            short_score += 1
+        
+        # CMF selling pressure
+        if cmf < -0.1:
+            short_score += 2  # Strong selling pressure
+        elif cmf < 0:
+            short_score += 1  # Mild selling pressure
         
         # Volume confirmation
         if volume > volume_ma * 1.2:

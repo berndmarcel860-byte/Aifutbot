@@ -39,6 +39,31 @@ A professional Python AI scalping bot for Binance Futures that scans multiple tr
   - **Prevents Counter-Trend Trading**: Blocks SHORT signals at lower band (oversold), LONG signals at upper band (overbought)
   - **Enhances Entry Quality**: Adds bonus points for mean reversion setups at extremes
 
+### 🆕 Advanced Technical Indicators (NEW)
+- **MACD (Moving Average Convergence Divergence)**: 
+  - Momentum indicator with 12/26/9 periods
+  - Identifies trend reversals and momentum shifts
+  - **+2 points** for bullish/bearish crossover with strong histogram
+  - **+1 point** for simple crossover
+- **Stochastic Oscillator**: 
+  - 14-period %K and 3-period %D
+  - Detects overbought (>80) and oversold (<20) conditions
+  - **+2 points** for extreme levels (K&D >80 or <20)
+  - **+1 point** for moderate levels
+- **ADX (Average Directional Index)**:
+  - 14-period trend strength indicator
+  - Values >25 indicate strong trending market
+  - **+1 point** when ADX >25 (confirms trend validity)
+- **Ichimoku Cloud** (Simplified):
+  - Tenkan-sen (9-period) and Kijun-sen (26-period)
+  - Identifies support/resistance and trend direction
+  - **+1 point** when Tenkan above Kijun (bullish) or below (bearish)
+- **CMF (Chaikin Money Flow)**:
+  - 20-period volume-weighted accumulation/distribution
+  - Positive values indicate buying pressure, negative indicate selling
+  - **+2 points** for strong pressure (>0.1 or <-0.1)
+  - **+1 point** for mild pressure
+
 ### Price Action Patterns
 - **Break of Structure (BOS)**: Identifies trend shifts and momentum changes
 - **Liquidity Sweep**: Detects stop hunts and false breakouts
@@ -84,6 +109,35 @@ Stop Loss:
 - **Entry 1** is placed as a MARKET order (executes immediately at best available price)
 - **Entries 2-4** are placed as LIMIT orders at Fibonacci-based levels below the entry for LONG (above for SHORT)
 - This allows you to enter quickly with 10%, then average in with 30% at each DCA level if price moves in your favor
+
+### 📊 Signal Scoring System
+
+The bot uses a multi-factor scoring system with **maximum possible score of 20+ points**. Default minimum threshold is 6 points.
+
+**LONG Signal Scoring:**
+- EMA alignment (fast > slow): +2 points
+- Price above VWAP: +1 point
+- RSI conditions: +1 to +2 points
+- Bollinger Band extreme (oversold bounce): +2 points
+- **MACD bullish**: +1 to +2 points
+- **Stochastic oversold**: +1 to +2 points
+- **ADX strong trend**: +1 point
+- **Ichimoku bullish**: +1 point
+- **CMF buying pressure**: +1 to +2 points
+- Volume spike: +1 point
+- Bullish BOS: +2 points
+- Bullish liquidity sweep: +2 points
+- Bullish pullback: +1 point
+
+**SHORT Signal Scoring:** (inverse logic with same point structure)
+
+**Score Interpretation:**
+- **6-8 points**: Minimum quality signal, proceed with caution
+- **9-12 points**: Good quality signal with multiple confirmations
+- **13-16 points**: High quality signal with strong confluence
+- **17+ points**: Exceptional signal with maximum confirmation
+
+**Note:** The 5 new advanced indicators (MACD, Stochastic, ADX, Ichimoku, CMF) add up to 9 additional possible points, significantly improving signal accuracy and profitability.
 
 ## 📋 Requirements
 
@@ -169,7 +223,7 @@ class BotConfig:
     
     # Signal filtering
     max_signals_per_scan: int = 5            # Top N signals to send
-    signal_threshold: int = 6                # Minimum score (0-12+)
+    signal_threshold: int = 6                # Minimum score (0-20+, recommended: 6-8)
     
     # Risk management
     risk_per_trade: float = 0.02             # 2% risk per trade
