@@ -35,6 +35,9 @@ A professional Python AI scalping bot for Binance Futures that scans multiple tr
 - **RSI (Relative Strength Index)**: Overbought/oversold conditions (14 period)
 - **Volume Analysis**: Volume confirmation with 20-period moving average
 - **ATR (Average True Range)**: Volatility-based position sizing and TP/SL calculation
+- **Bollinger Bands**: 20-period bands with 2 standard deviations to detect extreme price levels
+  - **Prevents Counter-Trend Trading**: Blocks SHORT signals at lower band (oversold), LONG signals at upper band (overbought)
+  - **Enhances Entry Quality**: Adds bonus points for mean reversion setups at extremes
 
 ### Price Action Patterns
 - **Break of Structure (BOS)**: Identifies trend shifts and momentum changes

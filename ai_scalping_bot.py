@@ -464,6 +464,18 @@ class TechnicalIndicators:
     def volume_ma(volume: pd.Series, period: int = 20) -> pd.Series:
         """Volume Moving Average"""
         return volume.rolling(window=period).mean()
+    
+    @staticmethod
+    def bollinger_bands(data: pd.Series, period: int = 20, std_dev: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """
+        Bollinger Bands
+        Returns (upper_band, middle_band, lower_band)
+        """
+        middle_band = data.rolling(window=period).mean()
+        std = data.rolling(window=period).std()
+        upper_band = middle_band + (std * std_dev)
+        lower_band = middle_band - (std * std_dev)
+        return upper_band, middle_band, lower_band
 
 
 # ============================================================================
@@ -673,6 +685,7 @@ class SignalGenerator:
         atr = self.indicators.atr(df['high'], df['low'], df['close'], self.config.atr_period)
         vwap = self.indicators.vwap(df['high'], df['low'], df['close'], df['volume'])
         volume_ma = self.indicators.volume_ma(df['volume'], self.config.volume_ma_period)
+        bb_upper, bb_middle, bb_lower = self.indicators.bollinger_bands(df['close'], period=20, std_dev=2.0)
         
         # Current values
         current_price = df['close'].iloc[-1]
@@ -683,6 +696,9 @@ class SignalGenerator:
         ema_fast_val = ema_fast.iloc[-1]
         ema_slow_val = ema_slow.iloc[-1]
         vwap_val = vwap.iloc[-1]
+        bb_upper_val = bb_upper.iloc[-1]
+        bb_middle_val = bb_middle.iloc[-1]
+        bb_lower_val = bb_lower.iloc[-1]
         
         # Detect patterns
         bos = self.pattern_analyzer.detect_break_of_structure(df, self.config.bos_lookback)
@@ -699,6 +715,9 @@ class SignalGenerator:
             'vwap': vwap_val,
             'volume': current_volume,
             'volume_ma': current_volume_ma,
+            'bb_upper': bb_upper_val,
+            'bb_middle': bb_middle_val,
+            'bb_lower': bb_lower_val,
             'bos': bos,
             'liquidity_sweep': liquidity_sweep,
             'pullback': pullback
@@ -720,12 +739,31 @@ class SignalGenerator:
         vwap_val = analysis['vwap']
         volume = analysis['volume']
         volume_ma = analysis['volume_ma']
+        bb_upper = analysis['bb_upper']
+        bb_middle = analysis['bb_middle']
+        bb_lower = analysis['bb_lower']
         bos = analysis['bos']
         liquidity_sweep = analysis['liquidity_sweep']
         pullback = analysis['pullback']
         
+        # Calculate price position within Bollinger Bands
+        bb_range = bb_upper - bb_lower
+        if bb_range > 0:
+            bb_position = (price - bb_lower) / bb_range  # 0 = at lower band, 1 = at upper band
+        else:
+            bb_position = 0.5  # Middle if no range
+        
+        # Check for extreme positions (at or near Bollinger Band extremes)
+        at_lower_band = bb_position <= 0.1  # Price at or below 10% of BB range (oversold extreme)
+        at_upper_band = bb_position >= 0.9  # Price at or above 90% of BB range (overbought extreme)
+        
         # Score for LONG signal
         long_score = 0
+        
+        # CRITICAL: Block LONG signals at overbought extremes (upper Bollinger Band)
+        if at_upper_band:
+            logger.debug(f"Price at upper Bollinger Band ({bb_position:.2f}) - blocking LONG signal to avoid buying at extreme")
+            return None, 0
         
         # EMA alignment (uptrend)
         if ema_fast > ema_slow:
@@ -740,6 +778,11 @@ class SignalGenerator:
             long_score += 2
         elif rsi < 50:
             long_score += 1
+        
+        # Bonus: Price near lower Bollinger Band (potential bounce)
+        if at_lower_band and rsi < 40:
+            long_score += 2
+            logger.debug(f"Price at lower Bollinger Band ({bb_position:.2f}) with RSI {rsi:.1f} - potential oversold bounce")
         
         # Volume confirmation
         if volume > volume_ma * 1.2:
@@ -756,6 +799,11 @@ class SignalGenerator:
         # Score for SHORT signal
         short_score = 0
         
+        # CRITICAL: Block SHORT signals at oversold extremes (lower Bollinger Band)
+        if at_lower_band:
+            logger.debug(f"Price at lower Bollinger Band ({bb_position:.2f}) - blocking SHORT signal to avoid selling at extreme")
+            return None, 0
+        
         # EMA alignment (downtrend)
         if ema_fast < ema_slow:
             short_score += 2
@@ -769,6 +817,11 @@ class SignalGenerator:
             short_score += 2
         elif rsi > 50:
             short_score += 1
+        
+        # Bonus: Price near upper Bollinger Band (potential rejection)
+        if at_upper_band and rsi > 60:
+            short_score += 2
+            logger.debug(f"Price at upper Bollinger Band ({bb_position:.2f}) with RSI {rsi:.1f} - potential overbought rejection")
         
         # Volume confirmation
         if volume > volume_ma * 1.2:
