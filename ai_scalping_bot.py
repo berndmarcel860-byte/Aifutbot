@@ -1221,22 +1221,48 @@ class ScalpingBot:
                     
                     signals.append(signal_data)
                     logger.info(f"✓ Signal found for {symbol}: {signal} (Score: {analysis['signal_score']})")
+                    
+                    # Send signal immediately if it meets threshold
+                    if analysis['signal_score'] >= self.config.signal_threshold:
+                        try:
+                            self.notifier.send_signal_alert(
+                                symbol=symbol,
+                                direction=signal,
+                                market_price=current_price,
+                                leverage=self.config.leverage,
+                                leverage_type=self.config.leverage_type,
+                                entries=entries,
+                                take_profit=take_profit,
+                                stop_loss=stop_loss,
+                                score=analysis['signal_score'],
+                                market_direction=analysis.get('market_direction')
+                            )
+                            logger.info(f"📤 Signal sent immediately for {symbol}")
+                            
+                            # Execute trade if auto_trade is enabled
+                            if self.config.auto_trade:
+                                logger.info(f"Auto-trade enabled, executing trade for {symbol}")
+                                self.execute_signal(signal_data)
+                        except Exception as send_error:
+                            logger.error(f"Error sending immediate signal for {symbol}: {send_error}")
                 
             except Exception as e:
                 logger.error(f"Error scanning {symbol}: {e}")
                 continue
         
-        # Sort by score (highest first)
+        # Sort by score (highest first) for summary
         signals.sort(key=lambda x: x['score'], reverse=True)
         
-        # Return top signals
-        top_signals = signals[:self.config.max_signals_per_scan]
-        logger.info(f"Found {len(signals)} total signals, sending top {len(top_signals)}")
+        logger.info(f"Scan complete. Found {len(signals)} total signals")
         
-        return top_signals
+        # Return empty list since signals were already sent
+        return []
     
     def send_signals_to_telegram(self, signals: List[Dict]):
-        """Send formatted signals to Telegram and optionally execute trades"""
+        """
+        Legacy batch method - kept for compatibility but no longer used.
+        Signals are now sent immediately when found during scanning for faster delivery.
+        """
         if not signals:
             logger.info("No signals to send")
             return
@@ -1263,8 +1289,8 @@ class ScalpingBot:
                     logger.info(f"Auto-trade enabled, executing trade for {signal_data['symbol']}")
                     self.execute_signal(signal_data)
                 
-                time.sleep(1)  # Small delay between messages
-                
+            except Exception as e:
+                logger.error(f"Error sending signal for {signal_data['symbol']}: {e}")
             except Exception as e:
                 logger.error(f"Error sending signal for {signal_data['symbol']}: {e}")
     
@@ -1298,18 +1324,12 @@ class ScalpingBot:
             self.notifier.send_message(f"❌ Trade execution failed for {signal_data['symbol']}: {e}")
     
     def run_cycle(self):
-        """Run one trading cycle - scan multiple symbols and send signals"""
+        """Run one trading cycle - scan multiple symbols and send signals immediately"""
         try:
-            # Scan all symbols for trading signals
+            # Scan all symbols for trading signals (signals sent immediately when found)
             logger.info("Starting multi-symbol scan...")
-            signals = self.scan_symbols_for_signals()
-            
-            # Send signals to Telegram
-            if signals:
-                logger.info(f"Found {len(signals)} high-quality signals")
-                self.send_signals_to_telegram(signals)
-            else:
-                logger.info("No signals found in this scan")
+            self.scan_symbols_for_signals()
+            logger.info("Scan cycle complete")
             
         except Exception as e:
             logger.error(f"Error in trading cycle: {e}", exc_info=True)

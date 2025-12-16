@@ -24,6 +24,7 @@ A professional Python AI scalping bot for Binance Futures that scans multiple tr
 
 ### 🔍 Multi-Symbol Scanner
 - **Intelligent Scanning**: Analyzes 20+ pairs simultaneously
+- **Instant Signal Delivery**: Signals sent to Telegram immediately when found (no batching delays)
 - **Best Opportunities First**: Scores and ranks all signals by quality
 - **Smart Filtering**: Skips coins with open positions/orders to prevent conflicts
 - **Continuous Monitoring**: Scans all pairs every 60 seconds
