@@ -42,10 +42,11 @@ A professional Python AI scalping bot for Binance Futures that scans multiple tr
 
 ### Advanced Trading Strategy
 - **4 Fibonacci-Based DCA Entries**: 
-  - Entry 1: 40% position at market (immediate entry)
-  - Entries 2-4: 20% each at Fibonacci levels (0.236, 0.382, 0.5, 0.618)
-- **Single Take Profit**: 2.5x ATR from entry price
-- **Single Stop Loss**: 1.5x ATR from entry price
+  - **Entry 1**: 40% position at **MARKET ORDER** (immediate fill at current price)
+  - **Entries 2-4**: 20% each at **LIMIT ORDERS** (Fibonacci levels: 0.236, 0.382, 0.5 below/above entry)
+  - Strategy: Enter immediately with partial position, average in if price moves favorably
+- **Single Take Profit**: 2.5x ATR from entry price (limit order)
+- **Single Stop Loss**: 1.5x ATR from entry price (stop market order)
 - **Duplicate Order Prevention**: Checks existing positions and open orders
 - **Dynamic Risk Management**: 2% risk per trade with leverage support
 
@@ -60,10 +61,10 @@ Market Price: $43,250.00
 Leverage: Cross 10x
 
 Entries:
-1. $43,250.00
-2. $43,150.00
-3. $43,100.00
-4. $43,050.00
+1. $43,250.00 (MARKET - 40%)
+2. $43,150.00 (LIMIT - 20%)
+3. $43,100.00 (LIMIT - 20%)
+4. $43,050.00 (LIMIT - 20%)
 
 Take Profits:
 1. $43,750.00
@@ -74,6 +75,11 @@ Stop Loss:
 📊 Signal Score: 8 points
 🌍 Market: BULLISH
 ```
+
+**Entry Strategy Explained:**
+- **Entry 1** is placed as a MARKET order (executes immediately at best available price)
+- **Entries 2-4** are placed as LIMIT orders at Fibonacci-based levels below the entry for LONG (above for SHORT)
+- This allows you to enter immediately while dollar-cost averaging if price moves in your favor
 
 ## 📋 Requirements
 
@@ -132,6 +138,8 @@ python check_env.py
 **Need help?** See [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions and troubleshooting.
 
 **🔒 Security Note:** If you previously exposed your API keys publicly, see [SECURITY_NOTICE.md](SECURITY_NOTICE.md) for immediate action steps.
+
+**❌ Getting API Errors?** See [API_TROUBLESHOOTING.md](API_TROUBLESHOOTING.md) for detailed solutions to common API issues.
 
 ## ⚙️ Configuration
 

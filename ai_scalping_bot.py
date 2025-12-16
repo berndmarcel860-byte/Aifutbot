@@ -161,10 +161,40 @@ class BinanceFuturesClient:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            logger.error(f"API request error: {e}")
-            if hasattr(e.response, 'text'):
-                logger.error(f"Response: {e.response.text}")
-            raise
+            error_msg = f"API request error: {e}"
+            
+            # Extract more specific error information
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_code = error_data.get('code', 'Unknown')
+                    error_message = error_data.get('msg', str(e))
+                    error_msg = f"Binance API Error {error_code}: {error_message}"
+                    
+                    # Provide helpful hints for common errors
+                    if error_code == -2015:
+                        error_msg += "\n💡 Hint: Invalid API key. Check your BINANCE_API_KEY in .env file"
+                    elif error_code == -1022:
+                        error_msg += "\n💡 Hint: Invalid signature. Check your BINANCE_API_SECRET in .env file"
+                    elif error_code == -2021:
+                        error_msg += "\n💡 Hint: Order would immediately trigger. Adjust your entry price"
+                    elif error_code == -4131:
+                        error_msg += "\n💡 Hint: Percent price filter check failed. Price too far from market"
+                    elif error_code == -1111:
+                        error_msg += "\n💡 Hint: Invalid precision. Check quantity decimal places"
+                    elif error_code == -2019:
+                        error_msg += "\n💡 Hint: Insufficient margin. Add more funds or reduce position size"
+                    elif 'IP' in error_message or 'ip' in error_message:
+                        error_msg += "\n💡 Hint: IP restriction. Add your IP to API whitelist or remove restrictions"
+                    elif 'permission' in error_message.lower():
+                        error_msg += "\n💡 Hint: Enable 'Futures Trading' permission in API settings"
+                        
+                except:
+                    if hasattr(e.response, 'text'):
+                        error_msg += f"\nResponse: {e.response.text}"
+            
+            logger.error(error_msg)
+            raise Exception(error_msg)
     
     def get_klines(self, symbol: str, interval: str, limit: int = 500) -> List[List]:
         """Get candlestick data"""
@@ -372,7 +402,10 @@ class TelegramNotifier:
         )
         
         for i, entry in enumerate(entries, 1):
-            message += f"{i}. ${entry:.4f}\n"
+            if i == 1:
+                message += f"{i}. ${entry:.4f} (MARKET - 40%)\n"
+            else:
+                message += f"{i}. ${entry:.4f} (LIMIT - 20%)\n"
         
         message += (
             f"\n<b>Take Profits:</b>\n"
@@ -844,7 +877,9 @@ class PositionManager:
                 logger.warning("Calculated quantity is 0, skipping trade")
                 return
             
-            # Entry 1: Main entry (40% of total)
+            # DCA STRATEGY:
+            # Entry 1: Market order (40% of total position) - Immediate fill at current price
+            # Entries 2-4: Limit orders (20% each) - Fibonacci-based DCA levels below/above entry
             entry1_qty = round(quantity * 0.4, self.config.quantity_precision)
             
             # Place market order for immediate entry
