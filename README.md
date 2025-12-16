@@ -42,9 +42,9 @@ A professional Python AI scalping bot for Binance Futures that scans multiple tr
 
 ### Advanced Trading Strategy
 - **4 Fibonacci-Based DCA Entries**: 
-  - **Entry 1**: 40% position at **MARKET ORDER** (immediate fill at current price)
-  - **Entries 2-4**: 20% each at **LIMIT ORDERS** (Fibonacci levels: 0.236, 0.382, 0.5 below/above entry)
-  - Strategy: Enter immediately with partial position, average in if price moves favorably
+  - **Entry 1**: 10% position at **MARKET ORDER** (immediate fill at current price)
+  - **Entries 2-4**: 30% each at **LIMIT ORDERS** (Fibonacci levels: 0.236, 0.382, 0.5 below/above entry)
+  - Strategy: Enter immediately with small position, average in with larger amounts if price moves favorably
 - **Single Take Profit**: 2.5x ATR from entry price (limit order)
 - **Single Stop Loss**: 1.5x ATR from entry price (stop market order)
 - **Duplicate Order Prevention**: Checks existing positions and open orders
@@ -61,10 +61,10 @@ Market Price: $43,250.00
 Leverage: Cross 10x
 
 Entries:
-1. $43,250.00 (MARKET - 40%)
-2. $43,150.00 (LIMIT - 20%)
-3. $43,100.00 (LIMIT - 20%)
-4. $43,050.00 (LIMIT - 20%)
+1. $43,250.00 (MARKET - 10%)
+2. $43,150.00 (LIMIT - 30%)
+3. $43,100.00 (LIMIT - 30%)
+4. $43,050.00 (LIMIT - 30%)
 
 Take Profits:
 1. $43,750.00
@@ -79,7 +79,7 @@ Stop Loss:
 **Entry Strategy Explained:**
 - **Entry 1** is placed as a MARKET order (executes immediately at best available price)
 - **Entries 2-4** are placed as LIMIT orders at Fibonacci-based levels below the entry for LONG (above for SHORT)
-- This allows you to enter immediately while dollar-cost averaging if price moves in your favor
+- This allows you to enter quickly with 10%, then average in with 30% at each DCA level if price moves in your favor
 
 ## 📋 Requirements
 
@@ -300,8 +300,8 @@ The bot uses a scoring system to generate high-probability trading signals:
 
 ### Position Management
 
-1. **Entry 1 (40%)**: Market order for immediate entry
-2. **Entry 2-4 (20% each)**: Limit orders at Fibonacci-based DCA levels
+1. **Entry 1 (10%)**: Market order for immediate entry
+2. **Entry 2-4 (30% each)**: Limit orders at Fibonacci-based DCA levels
 3. **Take Profit**: Single limit order at 2.5x ATR (reduce-only)
 4. **Stop Loss**: Stop market order at 1.5x ATR (reduce-only)
 

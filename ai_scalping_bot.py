@@ -403,9 +403,9 @@ class TelegramNotifier:
         
         for i, entry in enumerate(entries, 1):
             if i == 1:
-                message += f"{i}. ${entry:.4f} (MARKET - 40%)\n"
+                message += f"{i}. ${entry:.4f} (MARKET - 10%)\n"
             else:
-                message += f"{i}. ${entry:.4f} (LIMIT - 20%)\n"
+                message += f"{i}. ${entry:.4f} (LIMIT - 30%)\n"
         
         message += (
             f"\n<b>Take Profits:</b>\n"
@@ -878,9 +878,9 @@ class PositionManager:
                 return
             
             # DCA STRATEGY:
-            # Entry 1: Market order (40% of total position) - Immediate fill at current price
-            # Entries 2-4: Limit orders (20% each) - Fibonacci-based DCA levels below/above entry
-            entry1_qty = round(quantity * 0.4, self.config.quantity_precision)
+            # Entry 1: Market order (10% of total position) - Immediate fill at current price
+            # Entries 2-4: Limit orders (30% each) - Fibonacci-based DCA levels below/above entry
+            entry1_qty = round(quantity * 0.1, self.config.quantity_precision)
             
             # Place market order for immediate entry
             logger.info(f"Placing {side} market order for {symbol}: {entry1_qty} @ market")
@@ -902,8 +902,8 @@ class PositionManager:
             # Calculate DCA levels
             dca_levels = self.calculate_dca_levels(entry_price, signal, atr)
             
-            # Place DCA limit orders (20% each)
-            dca_qty = round(quantity * 0.2, self.config.quantity_precision)
+            # Place DCA limit orders (30% each)
+            dca_qty = round(quantity * 0.3, self.config.quantity_precision)
             
             for i, dca_price in enumerate(dca_levels, 2):
                 try:
