@@ -377,9 +377,15 @@ The bot uses a scoring system to generate high-probability trading signals:
 1. **Entry 1 (10%)**: Market order for immediate entry
 2. **Entry 2-4 (30% each)**: Limit orders at Fibonacci-based DCA levels
 3. **Take Profit**: Single limit order at 2.5x ATR (reduce-only)
-4. **Stop Loss**: Stop market order at 1.5x ATR (reduce-only)
+4. **Stop Loss**: Stop market order at 1.0x ATR (reduce-only) - Optimized for fast scalping
 
 ### Risk Management
+
+**Fast Scalping Risk/Reward System (Optimized):**
+- **Take Profit**: 1.5x ATR - Quick exits for fast scalping trades
+- **Stop Loss**: 1.0x ATR - Tight stops to minimize losses  
+- **Risk:Reward Ratio**: 1.5:1 - Optimized for high-frequency trading
+- **Strategy**: Allows SHORT positions even at lower Bollinger Band with proper risk management
 
 - Position size calculated based on:
   - Account balance

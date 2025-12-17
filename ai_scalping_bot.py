@@ -72,8 +72,8 @@ class BotConfig:
     volume_ma_period: int = 20
     
     # TP/SL parameters
-    tp_atr_multiplier: float = 2.5
-    sl_atr_multiplier: float = 1.5
+    tp_atr_multiplier: float = 1.5  # Fast scalping: quick take profit
+    sl_atr_multiplier: float = 1.0  # Tight stop loss for better R:R (1.5:1)
     
     # Pattern detection
     bos_lookback: int = 20
@@ -949,10 +949,8 @@ class SignalGenerator:
         # Score for SHORT signal
         short_score = 0
         
-        # CRITICAL: Block SHORT signals at oversold extremes (lower Bollinger Band)
-        if at_lower_band:
-            logger.debug(f"Price at lower Bollinger Band ({bb_position:.2f}) - blocking SHORT signal to avoid selling at extreme")
-            return None, 0
+        # NOTE: Removed BB lower band blocking for SHORT signals
+        # User strategy: Allow shorts at lower BB with tight SL and fast TP for scalping
         
         # EMA alignment (downtrend)
         if ema_fast < ema_slow:
