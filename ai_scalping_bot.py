@@ -58,9 +58,12 @@ class BotConfig:
     max_positions: int = 3
     max_signals_per_scan: int = 5  # Maximum signals to send per scan
     
-    # DCA parameters (Fibonacci levels)
-    dca_levels: List[float] = None  # Will be set to [0.236, 0.382, 0.5, 0.618]
+    # DCA parameters (8 Fibonacci levels for better averaging)
+    dca_levels: List[float] = None  # Will be set to 8 levels: [0.191, 0.236, 0.382, 0.5, 0.618, 0.764, 0.854, 1.0]
     dca_multiplier: float = 1.5  # Position size multiplier for DCA entries
+    
+    # TP parameters (4 take profit levels for scaling out)
+    tp_levels: List[float] = None  # Will be set to [0.75, 1.0, 1.25, 1.5] x ATR
     
     # Indicator parameters
     ema_fast: int = 9
@@ -94,7 +97,11 @@ class BotConfig:
     
     def __post_init__(self):
         if self.dca_levels is None:
-            self.dca_levels = [0.236, 0.382, 0.5, 0.618]
+            # 8 DCA levels: More Fibonacci ratios for better averaging
+            self.dca_levels = [0.191, 0.236, 0.382, 0.5, 0.618, 0.764, 0.854, 1.0]
+        if self.tp_levels is None:
+            # 4 TP levels for scaling out: 0.75x, 1.0x, 1.25x, 1.5x ATR
+            self.tp_levels = [0.75, 1.0, 1.25, 1.5]
         if self.symbols_to_scan is None:
             # Popular Binance Futures pairs with good liquidity
             self.symbols_to_scan = [
@@ -380,9 +387,9 @@ class TelegramNotifier:
     
     def send_signal_alert(self, symbol: str, direction: str, market_price: float,
                          leverage: int, leverage_type: str, entries: List[float],
-                         take_profit: float, stop_loss: float, score: int = None,
+                         take_profits: List[float], stop_loss: float, score: int = None,
                          market_direction: str = None):
-        """Send formatted trading signal alert"""
+        """Send formatted trading signal alert with 8 entries and 4 TPs"""
         # Add market direction indicator
         market_emoji = ""
         if market_direction:
@@ -402,16 +409,20 @@ class TelegramNotifier:
             f"<b>Entries:</b>\n"
         )
         
+        # Position sizing for 8 entries: 5%, 13.57% x 7
         for i, entry in enumerate(entries, 1):
             if i == 1:
-                message += f"{i}. ${entry:.4f} (MARKET - 10%)\n"
+                message += f"{i}. ${entry:.4f} (MARKET - 5%)\n"
             else:
-                message += f"{i}. ${entry:.4f} (LIMIT - 30%)\n"
+                message += f"{i}. ${entry:.4f} (LIMIT - 13.57%)\n"
+        
+        message += "\n<b>Take Profits:</b>\n"
+        # 4 TP levels, 25% each
+        for i, tp in enumerate(take_profits, 1):
+            message += f"{i}. ${tp:.4f} (25%)\n"
         
         message += (
-            f"\n<b>Take Profits:</b>\n"
-            f"1. ${take_profit:.4f}\n\n"
-            f"<b>Stop Loss:</b>\n"
+            f"\n<b>Stop Loss:</b>\n"
             f"1. ${stop_loss:.4f}"
         )
         
@@ -1069,22 +1080,28 @@ class PositionManager:
         
         return dca_prices
     
-    def calculate_tp_sl(self, entry_price: float, side: str, atr: float) -> Tuple[float, float]:
-        """Calculate Take Profit and Stop Loss levels"""
-        tp_distance = atr * self.config.tp_atr_multiplier
+    def calculate_tp_sl(self, entry_price: float, side: str, atr: float) -> Tuple[List[float], float]:
+        """Calculate Take Profit levels (4 levels) and Stop Loss level"""
         sl_distance = atr * self.config.sl_atr_multiplier
         
+        tp_prices = []
+        for tp_mult in self.config.tp_levels:
+            tp_distance = atr * tp_mult
+            if side == 'LONG':
+                tp_price = entry_price + tp_distance
+            else:
+                tp_price = entry_price - tp_distance
+            tp_prices.append(round(tp_price, 2))
+        
         if side == 'LONG':
-            take_profit = entry_price + tp_distance
             stop_loss = entry_price - sl_distance
         else:
-            take_profit = entry_price - tp_distance
             stop_loss = entry_price + sl_distance
         
-        return round(take_profit, 2), round(stop_loss, 2)
+        return tp_prices, round(stop_loss, 2)
     
     def open_position(self, signal: str, entry_price: float, atr: float, analysis: Dict, symbol: str = None):
-        """Open new position with DCA entries"""
+        """Open new position with 8 DCA entries and 4 TP levels"""
         try:
             # Use provided symbol or fall back to config symbol
             if symbol is None:
@@ -1094,9 +1111,9 @@ class PositionManager:
             balance = self.client.get_account_balance()
             logger.info(f"Account balance: ${balance:.2f}")
             
-            # Calculate SL first
+            # Calculate TP/SL
             side = 'BUY' if signal == 'LONG' else 'SELL'
-            tp_price, sl_price = self.calculate_tp_sl(entry_price, signal, atr)
+            tp_prices, sl_price = self.calculate_tp_sl(entry_price, signal, atr)
             
             # Calculate position size
             quantity = self.calculate_position_size(entry_price, sl_price, balance)
@@ -1105,10 +1122,10 @@ class PositionManager:
                 logger.warning("Calculated quantity is 0, skipping trade")
                 return
             
-            # DCA STRATEGY:
-            # Entry 1: Market order (10% of total position) - Immediate fill at current price
-            # Entries 2-4: Limit orders (30% each) - Fibonacci-based DCA levels below/above entry
-            entry1_qty = round(quantity * 0.1, self.config.quantity_precision)
+            # 8-ENTRY DCA STRATEGY:
+            # Entry 1: Market order (5% of total position) - Immediate fill at current price
+            # Entries 2-8: Limit orders (13.57% each = 95%/7) - Fibonacci-based DCA levels
+            entry1_qty = round(quantity * 0.05, self.config.quantity_precision)
             
             # Place market order for immediate entry
             logger.info(f"Placing {side} market order for {symbol}: {entry1_qty} @ market")
@@ -1124,14 +1141,14 @@ class PositionManager:
             # Send Telegram notification
             reason = f"Signal: {signal}, RSI: {analysis['rsi']:.1f}, BOS: {analysis['bos']}, Sweep: {analysis['liquidity_sweep']}"
             self.notifier.send_trade_alert(
-                'ENTRY 1/4', symbol, side, entry_price, entry1_qty, reason
+                'ENTRY 1/8', symbol, side, entry_price, entry1_qty, reason
             )
             
             # Calculate DCA levels
             dca_levels = self.calculate_dca_levels(entry_price, signal, atr)
             
-            # Place DCA limit orders (30% each)
-            dca_qty = round(quantity * 0.3, self.config.quantity_precision)
+            # Place DCA limit orders (13.57% each, rounded)
+            dca_qty = round(quantity * (0.95 / 7), self.config.quantity_precision)
             
             for i, dca_price in enumerate(dca_levels, 2):
                 try:
@@ -1147,24 +1164,27 @@ class PositionManager:
                 except Exception as e:
                     logger.error(f"Failed to place DCA {i} order: {e}")
             
-            # Place Take Profit order (reduce only)
+            # Place 4 Take Profit orders (25% each, reduce only)
             time.sleep(self.config.order_delay)
             total_qty = quantity
+            tp_qty = round(total_qty * 0.25, self.config.quantity_precision)
+            tp_side = 'SELL' if signal == 'LONG' else 'BUY'
             
-            try:
-                tp_side = 'SELL' if signal == 'LONG' else 'BUY'
-                logger.info(f"Placing TP order for {symbol}: {total_qty} @ ${tp_price}")
-                tp_order = self.client.place_order(
-                    symbol=symbol,
-                    side=tp_side,
-                    order_type='LIMIT',
-                    quantity=total_qty,
-                    price=tp_price,
-                    reduce_only=True
-                )
-                logger.info(f"TP order placed: {tp_order}")
-            except Exception as e:
-                logger.error(f"Failed to place TP order: {e}")
+            for i, tp_price in enumerate(tp_prices, 1):
+                try:
+                    logger.info(f"Placing TP {i} order for {symbol}: {tp_qty} @ ${tp_price}")
+                    tp_order = self.client.place_order(
+                        symbol=symbol,
+                        side=tp_side,
+                        order_type='LIMIT',
+                        quantity=tp_qty,
+                        price=tp_price,
+                        reduce_only=True
+                    )
+                    logger.info(f"TP {i} order placed: {tp_order}")
+                    time.sleep(0.5)  # Small delay between TP orders
+                except Exception as e:
+                    logger.error(f"Failed to place TP {i} order: {e}")
             
             # Place Stop Loss order (reduce only)
             time.sleep(self.config.order_delay)
@@ -1184,7 +1204,7 @@ class PositionManager:
                 logger.error(f"Failed to place SL order: {e}")
             
             logger.info(f"Position opened successfully: {signal} {symbol} @ ${entry_price:.2f}")
-            logger.info(f"TP: ${tp_price:.2f}, SL: ${sl_price:.2f}")
+            logger.info(f"TPs: {tp_prices}, SL: ${sl_price:.2f}")
             logger.info(f"DCA levels: {dca_levels}")
             
         except Exception as e:
@@ -1413,21 +1433,27 @@ class ScalpingBot:
                     current_price = analysis['price']
                     atr = analysis['atr']
                     
-                    # Calculate DCA entry prices
+                    # Calculate 8 DCA entry prices
                     entries = [current_price]  # First entry at market
-                    for level in self.config.dca_levels[:3]:  # Only use first 3 DCA levels for signal
+                    for level in self.config.dca_levels[:7]:  # Use first 7 DCA levels (total 8 with market entry)
                         if signal == 'LONG':
                             entry_price = current_price - (atr * level * 2)
                         else:
                             entry_price = current_price + (atr * level * 2)
                         entries.append(entry_price)
                     
-                    # Calculate TP and SL
+                    # Calculate 4 TP levels and SL
+                    take_profits = []
+                    for tp_mult in self.config.tp_levels:
+                        if signal == 'LONG':
+                            tp_price = current_price + (atr * tp_mult)
+                        else:
+                            tp_price = current_price - (atr * tp_mult)
+                        take_profits.append(tp_price)
+                    
                     if signal == 'LONG':
-                        take_profit = current_price + (atr * self.config.tp_atr_multiplier)
                         stop_loss = current_price - (atr * self.config.sl_atr_multiplier)
                     else:
-                        take_profit = current_price - (atr * self.config.tp_atr_multiplier)
                         stop_loss = current_price + (atr * self.config.sl_atr_multiplier)
                     
                     signal_data = {
@@ -1435,7 +1461,7 @@ class ScalpingBot:
                         'direction': signal,
                         'market_price': current_price,
                         'entries': entries,
-                        'take_profit': take_profit,
+                        'take_profits': take_profits,
                         'stop_loss': stop_loss,
                         'score': analysis['signal_score'],
                         'rsi': analysis['rsi'],
@@ -1459,7 +1485,7 @@ class ScalpingBot:
                                 leverage=self.config.leverage,
                                 leverage_type=self.config.leverage_type,
                                 entries=entries,
-                                take_profit=take_profit,
+                                take_profits=take_profits,
                                 stop_loss=stop_loss,
                                 score=analysis['signal_score'],
                                 market_direction=analysis.get('market_direction')
@@ -1504,7 +1530,7 @@ class ScalpingBot:
                     leverage=self.config.leverage,
                     leverage_type=self.config.leverage_type,
                     entries=signal_data['entries'],
-                    take_profit=signal_data['take_profit'],
+                    take_profits=signal_data['take_profits'],
                     stop_loss=signal_data['stop_loss'],
                     score=signal_data['score'],
                     market_direction=signal_data.get('market_direction')

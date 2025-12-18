@@ -70,12 +70,16 @@ A professional Python AI scalping bot for Binance Futures that scans multiple tr
 - **Pullback Detection**: Identifies retracement opportunities in trending markets
 
 ### Advanced Trading Strategy
-- **4 Fibonacci-Based DCA Entries**: 
-  - **Entry 1**: 10% position at **MARKET ORDER** (immediate fill at current price)
-  - **Entries 2-4**: 30% each at **LIMIT ORDERS** (Fibonacci levels: 0.236, 0.382, 0.5 below/above entry)
-  - Strategy: Enter immediately with small position, average in with larger amounts if price moves favorably
-- **Single Take Profit**: 2.5x ATR from entry price (limit order)
-- **Single Stop Loss**: 1.5x ATR from entry price (stop market order)
+- **8 Fibonacci-Based DCA Entries** (NEW): 
+  - **Entry 1**: 5% position at **MARKET ORDER** (immediate fill at current price)
+  - **Entries 2-8**: 13.57% each at **LIMIT ORDERS** (8 Fibonacci levels: 0.191, 0.236, 0.382, 0.5, 0.618, 0.764, 0.854, 1.0 x ATR)
+  - Strategy: Small immediate entry, then average in with equal-sized limits for better position averaging
+- **4 Take Profit Levels** (NEW): Scale out profits at multiple levels
+  - **TP1**: 0.75x ATR (25% position) - Quick scalp profit
+  - **TP2**: 1.0x ATR (25% position) - First major target
+  - **TP3**: 1.25x ATR (25% position) - Extended target
+  - **TP4**: 1.5x ATR (25% position) - Final target for trend continuation
+- **Single Stop Loss**: 1.0x ATR from entry price (stop market order for full position)
 - **Duplicate Order Prevention**: Checks existing positions and open orders
 - **Dynamic Risk Management**: 2% risk per trade with leverage support
 
@@ -90,13 +94,20 @@ Market Price: $43,250.00
 Leverage: Cross 10x
 
 Entries:
-1. $43,250.00 (MARKET - 10%)
-2. $43,150.00 (LIMIT - 30%)
-3. $43,100.00 (LIMIT - 30%)
-4. $43,050.00 (LIMIT - 30%)
+1. $43,250.00 (MARKET - 5%)
+2. $43,200.00 (LIMIT - 13.57%)
+3. $43,180.00 (LIMIT - 13.57%)
+4. $43,150.00 (LIMIT - 13.57%)
+5. $43,120.00 (LIMIT - 13.57%)
+6. $43,090.00 (LIMIT - 13.57%)
+7. $43,060.00 (LIMIT - 13.57%)
+8. $43,030.00 (LIMIT - 13.57%)
 
 Take Profits:
-1. $43,750.00
+1. $43,325.00 (25%)
+2. $43,350.00 (25%)
+3. $43,375.00 (25%)
+4. $43,400.00 (25%)
 
 Stop Loss:
 1. $42,900.00
