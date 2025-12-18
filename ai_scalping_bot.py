@@ -1433,13 +1433,16 @@ class ScalpingBot:
                     current_price = analysis['price']
                     atr = analysis['atr']
                     
-                    # Calculate 8 DCA entry prices
+                    # Calculate 8 DCA entry prices with proper spacing
                     entries = [current_price]  # First entry at market
-                    for level in self.config.dca_levels[:7]:  # Use first 7 DCA levels (total 8 with market entry)
+                    # Use cumulative spacing for better entry distribution
+                    for i, level in enumerate(self.config.dca_levels[:7], 1):  # Use first 7 DCA levels (total 8 with market entry)
                         if signal == 'LONG':
-                            entry_price = current_price - (atr * level * 2)
+                            # For LONG, entries go progressively lower
+                            entry_price = current_price - (atr * level * 3.0)  # Increased multiplier for better spacing
                         else:
-                            entry_price = current_price + (atr * level * 2)
+                            # For SHORT, entries go progressively higher
+                            entry_price = current_price + (atr * level * 3.0)  # Increased multiplier for better spacing
                         entries.append(entry_price)
                     
                     # Calculate 4 TP levels and SL
