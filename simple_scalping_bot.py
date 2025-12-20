@@ -360,25 +360,30 @@ class TelegramNotifier:
             return False
     
     def send_signal(self, symbol: str, direction: str, price: float, 
-                    tp: float, sl: float, strategies: List[str], 
+                    entries: List[float], tp: float, sl: float, strategies: List[str], 
                     strategy_count: int) -> bool:
         """Send formatted trading signal"""
-        message = f"""
-🎯 <b>SCALPING SIGNAL</b> 🎯
+        # Determine market direction emoji
+        market_emoji = "📈" if direction == "LONG" else "📉"
+        
+        message = f"""⚡⚡ {symbol} ⚡⚡ {market_emoji}
+Exchange: Binance Futures
+Direction: {direction}
+Market Price: ${price:.4f}
 
-<b>Symbol:</b> {symbol}
-<b>Direction:</b> {direction}
-<b>Entry Price:</b> ${price:.4f}
+Leverage: Cross 20x
 
-<b>Take Profit:</b> ${tp:.4f}
-<b>Stop Loss:</b> ${sl:.4f}
+Entries:
+1. ${entries[0]:.4f}
+2. ${entries[1]:.4f}
+3. ${entries[2]:.4f}
+4. ${entries[3]:.4f}
 
-<b>Risk:Reward:</b> 1.5:1
+Take Profits:
+1. ${tp:.4f}
 
-<b>Strategies Confirmed ({strategy_count}/3):</b>
-{chr(10).join([f'✅ {s}' for s in strategies])}
-
-<b>⚠️ Trade at your own risk</b>
+Stop Loss:
+1. ${sl:.4f}
 """
         return self.send_message(message)
 
@@ -428,12 +433,32 @@ class SimpleScalpingBot:
         current_price = float(df['close'].iloc[-1])
         atr = self.indicators.atr(df['high'], df['low'], df['close']).iloc[-1]
         
+        # Calculate 4 DCA entries using Fibonacci levels
+        fib_levels = [0.236, 0.382, 0.5, 0.618]
+        entries = []
+        
         if direction == 'LONG':
+            # Entry 1 at market price
+            entries.append(current_price)
+            # Entries 2-4 below market price
+            for level in fib_levels[:3]:
+                entry_price = current_price - (atr * level * 3.0)
+                entries.append(entry_price)
+            
             tp = current_price + (atr * self.config.tp_atr_multiplier)
-            sl = current_price - (atr * self.config.sl_atr_multiplier)
+            # SL must be below the last (4th) entry to avoid same price
+            sl = entries[3] - (atr * 0.5)  # Additional buffer below last entry
         else:
+            # Entry 1 at market price
+            entries.append(current_price)
+            # Entries 2-4 above market price
+            for level in fib_levels[:3]:
+                entry_price = current_price + (atr * level * 3.0)
+                entries.append(entry_price)
+            
             tp = current_price - (atr * self.config.tp_atr_multiplier)
-            sl = current_price + (atr * self.config.sl_atr_multiplier)
+            # SL must be above the last (4th) entry to avoid same price
+            sl = entries[3] + (atr * 0.5)  # Additional buffer above last entry
         
         # Get which strategies triggered
         triggered = [name for name, sig in signals.items() if sig == direction]
@@ -442,6 +467,7 @@ class SimpleScalpingBot:
             'symbol': symbol,
             'direction': direction,
             'price': current_price,
+            'entries': entries,
             'tp': tp,
             'sl': sl,
             'strategies': triggered,
@@ -482,6 +508,7 @@ class SimpleScalpingBot:
             for result in signals_to_send:
                 logger.info(f"\n🎯 {result['symbol']} {result['direction']}")
                 logger.info(f"   Entry: ${result['price']:.4f}")
+                logger.info(f"   Entries: {[f'${e:.4f}' for e in result['entries']]}")
                 logger.info(f"   TP: ${result['tp']:.4f}")
                 logger.info(f"   SL: ${result['sl']:.4f}")
                 logger.info(f"   Strategies: {result['count']}/3 confirmed")
@@ -491,6 +518,7 @@ class SimpleScalpingBot:
                     result['symbol'],
                     result['direction'],
                     result['price'],
+                    result['entries'],
                     result['tp'],
                     result['sl'],
                     result['strategies'],
