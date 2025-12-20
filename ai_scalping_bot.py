@@ -639,6 +639,56 @@ class PriceActionAnalyzer:
         return None
     
     @staticmethod
+    def detect_candle_wick(df: pd.DataFrame, wick_ratio: float = 10.0) -> Optional[str]:
+        """
+        Detect candle wick reversal pattern
+        Large wick (10x body size) after 3 candles in same direction signals potential reversal
+        Returns 'BULLISH' or 'BEARISH' if pattern detected
+        """
+        if len(df) < 4:
+            return None
+        
+        # Get last 4 candles
+        candles = df.tail(4)
+        
+        # Check if first 3 candles are in same direction
+        bodies = []
+        for i in range(3):
+            candle = candles.iloc[i]
+            body = abs(candle['close'] - candle['open'])
+            direction = 1 if candle['close'] > candle['open'] else -1
+            bodies.append((body, direction))
+        
+        # All 3 must be same direction
+        if not all(b[1] == bodies[0][1] for b in bodies):
+            return None
+        
+        # Check 4th candle for large wick
+        last_candle = candles.iloc[-1]
+        body = abs(last_candle['close'] - last_candle['open'])
+        
+        if body == 0:  # Avoid division by zero
+            return None
+        
+        # Calculate upper and lower wicks
+        if last_candle['close'] > last_candle['open']:  # Bullish candle
+            upper_wick = last_candle['high'] - last_candle['close']
+            lower_wick = last_candle['open'] - last_candle['low']
+        else:  # Bearish candle
+            upper_wick = last_candle['high'] - last_candle['open']
+            lower_wick = last_candle['close'] - last_candle['low']
+        
+        # Bullish reversal: 3 bearish candles + large lower wick (10x body)
+        if bodies[0][1] == -1 and lower_wick > body * wick_ratio:
+            return 'BULLISH'
+        
+        # Bearish reversal: 3 bullish candles + large upper wick (10x body)
+        if bodies[0][1] == 1 and upper_wick > body * wick_ratio:
+            return 'BEARISH'
+        
+        return None
+    
+    @staticmethod
     def detect_pullback(df: pd.DataFrame, ema_fast: pd.Series, ema_slow: pd.Series) -> Optional[str]:
         """
         Detect pullback to moving average in trending market
@@ -818,6 +868,7 @@ class SignalGenerator:
         bos = self.pattern_analyzer.detect_break_of_structure(df, self.config.bos_lookback)
         liquidity_sweep = self.pattern_analyzer.detect_liquidity_sweep(df, self.config.liquidity_sweep_threshold)
         pullback = self.pattern_analyzer.detect_pullback(df, ema_fast, ema_slow)
+        candle_wick = self.pattern_analyzer.detect_candle_wick(df, wick_ratio=10.0)
         
         # Analysis data
         analysis = {
@@ -835,6 +886,7 @@ class SignalGenerator:
             'bos': bos,
             'liquidity_sweep': liquidity_sweep,
             'pullback': pullback,
+            'candle_wick': candle_wick,  # Add candle wick pattern
             # New advanced indicators
             'macd_line': macd_line_val,
             'macd_signal': macd_signal_val,
@@ -869,6 +921,7 @@ class SignalGenerator:
         bos = analysis['bos']
         liquidity_sweep = analysis['liquidity_sweep']
         pullback = analysis['pullback']
+        candle_wick = analysis['candle_wick']  # Add candle wick pattern
         
         # New advanced indicators
         macd_line = analysis['macd_line']
@@ -956,6 +1009,15 @@ class SignalGenerator:
             long_score += 2
         if pullback == 'BULLISH':
             long_score += 1
+        if candle_wick == 'BULLISH':
+            long_score += 2  # Candle wick reversal pattern
+            logger.debug(f"Bullish candle wick reversal detected")
+        
+        # StochRSIMACD Strategy: Powerful combination for scalping reversals
+        # Stochastic oversold (<20) + RSI bullish (>50) + MACD crossover = high probability setup
+        if stoch_k < 20 and stoch_d < 20 and rsi > 50 and macd_line > macd_signal:
+            long_score += 3  # Strong combined signal for scalping
+            logger.debug(f"StochRSIMACD bullish strategy triggered: Stoch K={stoch_k:.1f}, RSI={rsi:.1f}, MACD crossover")
         
         # Score for SHORT signal
         short_score = 0
@@ -1019,6 +1081,15 @@ class SignalGenerator:
             short_score += 2
         if pullback == 'BEARISH':
             short_score += 1
+        if candle_wick == 'BEARISH':
+            short_score += 2  # Candle wick reversal pattern
+            logger.debug(f"Bearish candle wick reversal detected")
+        
+        # StochRSIMACD Strategy: Powerful combination for scalping reversals
+        # Stochastic overbought (>80) + RSI bearish (<50) + MACD crossover = high probability setup
+        if stoch_k > 80 and stoch_d > 80 and rsi < 50 and macd_line < macd_signal:
+            short_score += 3  # Strong combined signal for scalping
+            logger.debug(f"StochRSIMACD bearish strategy triggered: Stoch K={stoch_k:.1f}, RSI={rsi:.1f}, MACD crossover")
         
         # Apply market direction filter if enabled
         if self.config.use_market_direction_filter and market_direction:

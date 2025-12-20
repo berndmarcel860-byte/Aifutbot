@@ -65,9 +65,22 @@ A professional Python AI scalping bot for Binance Futures that scans multiple tr
   - **+1 point** for mild pressure
 
 ### Price Action Patterns
-- **Break of Structure (BOS)**: Identifies trend shifts and momentum changes
-- **Liquidity Sweep**: Detects stop hunts and false breakouts
-- **Pullback Detection**: Identifies retracement opportunities in trending markets
+- **Break of Structure (BOS)**: Identifies trend shifts and momentum changes (+2 points)
+- **Liquidity Sweep**: Detects stop hunts and false breakouts (+2 points)
+- **Pullback Detection**: Identifies retracement opportunities in trending markets (+1 point)
+- **🆕 Candle Wick Reversal Pattern** (NEW): 
+  - Detects exhaustion patterns with large wicks (10x body size) after 3 consecutive candles in one direction
+  - **Bullish**: 3 bearish candles + large lower wick → potential reversal up (+2 points)
+  - **Bearish**: 3 bullish candles + large upper wick → potential reversal down (+2 points)
+  - Excellent for catching trend exhaustion and quick scalping reversals
+
+### 🆕 Combined Strategies (NEW)
+- **StochRSIMACD Strategy**: 
+  - Powerful combination specifically designed for fast scalping
+  - **Bullish Setup**: Stochastic K&D <20 (oversold) + RSI >50 (bullish momentum) + MACD bullish crossover (+3 points)
+  - **Bearish Setup**: Stochastic K&D >80 (overbought) + RSI <50 (bearish momentum) + MACD bearish crossover (+3 points)
+  - High-probability reversal signals with multiple confirmations
+  - Perfect for the bot's fast scalping strategy with 1.5:1 R:R
 
 ### Advanced Trading Strategy
 - **8 Fibonacci-Based DCA Entries** (NEW): 
