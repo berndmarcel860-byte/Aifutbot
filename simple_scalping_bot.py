@@ -46,14 +46,19 @@ class BotConfig:
     telegram_chat_id: str = os.getenv('TELEGRAM_CHAT_ID', '')
     
     # Trading parameters
-    symbol: str = 'BTCUSDT'  # Main symbol to trade
+    symbol: str = 'BTCUSDT'  # Main symbol to trade (used when auto_select disabled)
     timeframe: str = '5m'    # 5-minute candles for scalping
     leverage: int = 10
     risk_per_trade: float = 0.02  # 2% risk per trade
     
+    # Multi-symbol scanning
+    auto_select_coins: bool = True  # Automatically select most volatile coins
+    num_coins_to_scan: int = 10     # Number of coins to scan
+    
     # Strategy parameters
     scan_interval: int = 30   # Scan every 30 seconds
     signal_threshold: int = 2  # Minimum strategies that must agree
+    max_signals_per_scan: int = 3  # Maximum signals to send per cycle
     
     # Risk management (optimized for fast scalping)
     tp_atr_multiplier: float = 1.5  # Quick take profit
@@ -110,6 +115,45 @@ class BinanceClient:
         except Exception as e:
             logger.error(f"Error fetching klines: {e}")
             return pd.DataFrame()
+    
+    def get_most_volatile_symbols(self, num_symbols: int = 10) -> List[str]:
+        """Get most volatile USDT pairs for trading"""
+        url = f"{self.base_url}/fapi/v1/ticker/24hr"
+        
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            tickers = response.json()
+            
+            # Filter for USDT pairs
+            usdt_pairs = [
+                t for t in tickers 
+                if t['symbol'].endswith('USDT') 
+                and not t['symbol'].endswith('DOWNUSDT')
+                and not t['symbol'].endswith('UPUSDT')
+            ]
+            
+            # Calculate volatility score
+            for ticker in usdt_pairs:
+                try:
+                    price_change_pct = abs(float(ticker.get('priceChangePercent', 0)))
+                    volume = float(ticker.get('quoteVolume', 0))
+                    # Score = price change % × log(volume) to favor both volatile AND liquid pairs
+                    ticker['volatility_score'] = price_change_pct * np.log10(max(volume, 1))
+                except:
+                    ticker['volatility_score'] = 0
+            
+            # Sort by volatility score and get top N
+            sorted_pairs = sorted(usdt_pairs, key=lambda x: x['volatility_score'], reverse=True)
+            top_symbols = [pair['symbol'] for pair in sorted_pairs[:num_symbols]]
+            
+            logger.info(f"Selected {len(top_symbols)} most volatile coins: {', '.join(top_symbols[:5])}...")
+            return top_symbols
+            
+        except Exception as e:
+            logger.error(f"Error fetching volatile symbols: {e}")
+            # Fallback to default list
+            return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT']
 
 
 class TechnicalIndicators:
@@ -406,44 +450,70 @@ class SimpleScalpingBot:
         }
     
     def run_cycle(self):
-        """Run one scan cycle"""
+        """Run one scan cycle - scans multiple symbols"""
         logger.info("="*60)
         logger.info(f"Starting scan cycle at {datetime.now()}")
         logger.info("="*60)
         
-        result = self.analyze_market(self.config.symbol)
+        # Get symbols to scan
+        if self.config.auto_select_coins:
+            symbols = self.client.get_most_volatile_symbols(self.config.num_coins_to_scan)
+        else:
+            symbols = [self.config.symbol]
         
-        if result:
-            logger.info(f"✅ SIGNAL FOUND: {result['direction']} on {result['symbol']}")
-            logger.info(f"   Entry: ${result['price']:.4f}")
-            logger.info(f"   TP: ${result['tp']:.4f}")
-            logger.info(f"   SL: ${result['sl']:.4f}")
-            logger.info(f"   Strategies: {result['count']}/3 confirmed")
+        logger.info(f"Scanning {len(symbols)} symbols...")
+        
+        # Scan all symbols and collect signals
+        signals_found = []
+        for symbol in symbols:
+            result = self.analyze_market(symbol)
+            if result:
+                signals_found.append(result)
+                logger.info(f"✅ Signal: {result['direction']} on {result['symbol']} (Score: {result['count']}/3)")
+        
+        # Sort by strategy count (highest consensus first)
+        signals_found.sort(key=lambda x: x['count'], reverse=True)
+        
+        # Send top N signals
+        if signals_found:
+            signals_to_send = signals_found[:self.config.max_signals_per_scan]
+            logger.info(f"\n📊 Found {len(signals_found)} total signals, sending top {len(signals_to_send)}:")
             
-            # Send to Telegram
-            self.notifier.send_signal(
-                result['symbol'],
-                result['direction'],
-                result['price'],
-                result['tp'],
-                result['sl'],
-                result['strategies'],
-                result['count']
-            )
-            
-            # Execute trade if auto-trading enabled
-            if self.config.auto_trade:
-                logger.warning("Auto-trading is enabled but not implemented yet for safety")
+            for result in signals_to_send:
+                logger.info(f"\n🎯 {result['symbol']} {result['direction']}")
+                logger.info(f"   Entry: ${result['price']:.4f}")
+                logger.info(f"   TP: ${result['tp']:.4f}")
+                logger.info(f"   SL: ${result['sl']:.4f}")
+                logger.info(f"   Strategies: {result['count']}/3 confirmed")
+                
+                # Send to Telegram
+                self.notifier.send_signal(
+                    result['symbol'],
+                    result['direction'],
+                    result['price'],
+                    result['tp'],
+                    result['sl'],
+                    result['strategies'],
+                    result['count']
+                )
+                
+                # Execute trade if auto-trading enabled
+                if self.config.auto_trade:
+                    logger.warning("Auto-trading is enabled but not implemented yet for safety")
         else:
             logger.info("No signal found this cycle")
     
     def run(self):
         """Main bot loop"""
         logger.info("="*60)
-        logger.info("Simple Scalping Bot Started")
-        logger.info(f"Symbol: {self.config.symbol}")
+        logger.info("Simple Scalping Bot Started - Multi-Symbol Scanner")
+        if self.config.auto_select_coins:
+            logger.info(f"Mode: AUTO-SELECT (scanning top {self.config.num_coins_to_scan} volatile coins)")
+        else:
+            logger.info(f"Mode: SINGLE SYMBOL ({self.config.symbol})")
         logger.info(f"Timeframe: {self.config.timeframe}")
         logger.info(f"Signal Threshold: {self.config.signal_threshold}/3 strategies")
+        logger.info(f"Max Signals Per Scan: {self.config.max_signals_per_scan}")
         logger.info(f"Risk:Reward: 1.5:1 (TP: {self.config.tp_atr_multiplier}x ATR, SL: {self.config.sl_atr_multiplier}x ATR)")
         logger.info(f"Auto-Trade: {self.config.auto_trade}")
         logger.info("="*60)
@@ -451,10 +521,10 @@ class SimpleScalpingBot:
         while True:
             try:
                 self.run_cycle()
-                logger.info(f"Waiting {self.config.scan_interval} seconds until next scan...")
+                logger.info(f"\nWaiting {self.config.scan_interval} seconds until next scan...")
                 time.sleep(self.config.scan_interval)
             except KeyboardInterrupt:
-                logger.info("Bot stopped by user")
+                logger.info("\n\nBot stopped by user")
                 break
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
