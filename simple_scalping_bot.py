@@ -154,6 +154,70 @@ class BinanceClient:
             logger.error(f"Error fetching volatile symbols: {e}")
             # Fallback to default list
             return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT']
+    
+    def get_open_positions(self) -> List[str]:
+        """Get symbols with open positions"""
+        url = f"{self.base_url}/fapi/v2/positionRisk"
+        timestamp = int(time.time() * 1000)
+        
+        params = {'timestamp': timestamp}
+        params['signature'] = self._sign(params)
+        
+        headers = {'X-MBX-APIKEY': self.api_key}
+        
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            positions = response.json()
+            
+            # Filter positions with non-zero amount
+            open_symbols = [
+                pos['symbol'] for pos in positions
+                if float(pos.get('positionAmt', 0)) != 0
+            ]
+            
+            return open_symbols
+            
+        except Exception as e:
+            logger.warning(f"Error fetching open positions: {e}")
+            return []
+    
+    def get_open_orders(self) -> List[str]:
+        """Get symbols with open orders"""
+        url = f"{self.base_url}/fapi/v1/openOrders"
+        timestamp = int(time.time() * 1000)
+        
+        params = {'timestamp': timestamp}
+        params['signature'] = self._sign(params)
+        
+        headers = {'X-MBX-APIKEY': self.api_key}
+        
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            orders = response.json()
+            
+            # Get unique symbols with orders
+            open_symbols = list(set([order['symbol'] for order in orders]))
+            
+            return open_symbols
+            
+        except Exception as e:
+            logger.warning(f"Error fetching open orders: {e}")
+            return []
+    
+    def get_symbols_with_positions_or_orders(self) -> List[str]:
+        """Get all symbols that have either open positions or open orders"""
+        positions = self.get_open_positions()
+        orders = self.get_open_orders()
+        
+        # Combine and deduplicate
+        all_symbols = list(set(positions + orders))
+        
+        if all_symbols:
+            logger.info(f"Found {len(all_symbols)} symbols with existing positions/orders: {', '.join(all_symbols)}")
+        
+        return all_symbols
 
 
 class TechnicalIndicators:
@@ -481,11 +545,21 @@ class SimpleScalpingBot:
         logger.info(f"Starting scan cycle at {datetime.now()}")
         logger.info("="*60)
         
+        # Check for existing positions/orders first
+        symbols_to_skip = self.client.get_symbols_with_positions_or_orders()
+        
         # Get symbols to scan
         if self.config.auto_select_coins:
-            symbols = self.client.get_most_volatile_symbols(self.config.num_coins_to_scan)
+            all_symbols = self.client.get_most_volatile_symbols(self.config.num_coins_to_scan)
         else:
-            symbols = [self.config.symbol]
+            all_symbols = [self.config.symbol]
+        
+        # Filter out symbols with existing positions/orders
+        symbols = [s for s in all_symbols if s not in symbols_to_skip]
+        
+        if len(symbols) < len(all_symbols):
+            skipped_count = len(all_symbols) - len(symbols)
+            logger.info(f"⏭️  Skipped {skipped_count} symbols with existing positions/orders")
         
         logger.info(f"Scanning {len(symbols)} symbols...")
         
