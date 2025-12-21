@@ -87,6 +87,11 @@ class BotConfig:
     market_direction_symbol: str = 'BTCUSDT'  # Symbol to use for overall market direction
     use_market_direction_filter: bool = True  # Filter signals based on market direction
     
+    # Bollinger Band Strategy (configurable)
+    # 'safe': Block LONGs at upper BB, block SHORTs at lower BB (recommended for most traders)
+    # 'aggressive': Block LONGs at upper BB only, allow SHORTs at lower BB (for experienced traders)
+    bollinger_strategy: str = 'safe'  # Options: 'safe' or 'aggressive'
+    
     # Operational
     scan_interval: int = 60  # seconds
     order_delay: int = 1  # seconds between order placements
@@ -1022,8 +1027,11 @@ class SignalGenerator:
         # Score for SHORT signal
         short_score = 0
         
-        # NOTE: Removed BB lower band blocking for SHORT signals
-        # User strategy: Allow shorts at lower BB with tight SL and fast TP for scalping
+        # CRITICAL: Bollinger Band Strategy for SHORT signals
+        # Default 'safe' mode blocks shorts at lower BB to prevent shorting oversold extremes
+        if self.config.bollinger_strategy == 'safe' and at_lower_band:
+            logger.debug(f"[SAFE MODE] Price at lower Bollinger Band ({bb_position:.2f}) - blocking SHORT signal to avoid shorting oversold extreme")
+            return None, 0
         
         # EMA alignment (downtrend)
         if ema_fast < ema_slow:
