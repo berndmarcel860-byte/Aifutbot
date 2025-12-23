@@ -57,8 +57,10 @@ class BotConfig:
     
     # Strategy parameters
     scan_interval: int = 30   # Scan every 30 seconds
-    signal_threshold: int = 2  # Minimum strategies that must agree
+    signal_threshold: int = 2  # Minimum strategies that must agree (2 out of 3)
     max_signals_per_scan: int = 3  # Maximum signals to send per cycle
+    min_volume_multiplier: float = 1.5  # Minimum volume requirement
+    min_adx_threshold: float = 20  # Minimum ADX for trend strength
     
     # Risk management (optimized for fast scalping)
     tp_atr_multiplier: float = 1.5  # Quick take profit

@@ -82,10 +82,14 @@ class BotConfig:
     bos_lookback: int = 20
     liquidity_sweep_threshold: float = 0.001  # 0.1%
     
-    # Signal generation
-    signal_threshold: int = 6  # Minimum score for signal generation
+    # Signal generation - UPDATED FOR BETTER WIN RATE
+    signal_threshold: int = 10  # Minimum score for signal generation (raised from 6 to eliminate weak signals)
     market_direction_symbol: str = 'BTCUSDT'  # Symbol to use for overall market direction
     use_market_direction_filter: bool = True  # Filter signals based on market direction
+    min_volume_multiplier: float = 1.5  # Minimum volume multiplier (raised from 1.2)
+    min_adx_threshold: float = 20  # Minimum ADX for trend strength (avoids choppy markets)
+    stoch_oversold: float = 15  # Stochastic oversold level (more extreme, was 20)
+    stoch_overbought: float = 85  # Stochastic overbought level (more extreme, was 80)
     
     # Bollinger Band Strategy (configurable)
     # 'safe': Block LONGs at upper BB, block SHORTs at lower BB (recommended for most traders)
@@ -939,6 +943,9 @@ class SignalGenerator:
         kijun = analysis['kijun']
         cmf = analysis['cmf']
         
+        # Calculate volume ratio for multiple uses
+        volume_ratio = volume / volume_ma if volume_ma > 0 else 0
+        
         # Calculate price position within Bollinger Bands
         bb_range = bb_upper - bb_lower
         if bb_range > 0:
@@ -983,15 +990,21 @@ class SignalGenerator:
         elif macd_line > macd_signal:
             long_score += 1  # MACD crossover
         
-        # Stochastic oversold bounce
-        if stoch_k < 20 and stoch_d < 20:
-            long_score += 2  # Strong oversold
-        elif stoch_k < 30:
+        # Stochastic oversold bounce (stricter thresholds)
+        if stoch_k < self.config.stoch_oversold and stoch_d < self.config.stoch_oversold:
+            long_score += 2  # Strong oversold (now requires <15)
+        elif stoch_k < 25:
             long_score += 1  # Mild oversold
         
-        # ADX trend strength (only add if strong trend exists)
-        if adx > 25:
-            long_score += 1  # Strong trend confirmation
+        # ADX trend strength (avoid choppy markets)
+        if adx < self.config.min_adx_threshold:
+            # Penalize signals in choppy/ranging markets
+            logger.debug(f"ADX too low ({adx:.1f} < {self.config.min_adx_threshold}) - weak/choppy market, reducing confidence")
+            long_score = max(0, long_score - 2)  # Reduce score for low ADX
+        elif adx > 35:
+            long_score += 2  # Strong trend
+        elif adx > 25:
+            long_score += 1  # Moderate trend
         
         # Ichimoku bullish signal (Tenkan above Kijun = bullish)
         if tenkan > kijun:
@@ -1003,9 +1016,18 @@ class SignalGenerator:
         elif cmf > 0:
             long_score += 1  # Mild buying pressure
         
-        # Volume confirmation
-        if volume > volume_ma * 1.2:
-            long_score += 1
+        # Volume confirmation (stricter requirements)
+        volume_ratio = volume / volume_ma if volume_ma > 0 else 0
+        if volume_ratio > 3.0:
+            long_score += 3  # Exceptional volume
+        elif volume_ratio > 2.0:
+            long_score += 2  # High volume
+        elif volume_ratio > self.config.min_volume_multiplier:
+            long_score += 1  # Above average volume
+        else:
+            # Penalize low volume signals
+            logger.debug(f"Volume too low ({volume_ratio:.2f}x) - not enough liquidity")
+            long_score = max(0, long_score - 1)
         
         # Pattern confirmations
         if bos == 'BULLISH':
@@ -1018,11 +1040,13 @@ class SignalGenerator:
             long_score += 2  # Candle wick reversal pattern
             logger.debug(f"Bullish candle wick reversal detected")
         
-        # StochRSIMACD Strategy: Powerful combination for scalping reversals
-        # Stochastic oversold (<20) + RSI bullish (>50) + MACD crossover = high probability setup
-        if stoch_k < 20 and stoch_d < 20 and rsi > 50 and macd_line > macd_signal:
-            long_score += 3  # Strong combined signal for scalping
-            logger.debug(f"StochRSIMACD bullish strategy triggered: Stoch K={stoch_k:.1f}, RSI={rsi:.1f}, MACD crossover")
+        # StochRSIMACD Strategy: Stricter requirements for better win rate
+        # Stochastic extreme + RSI confirmation + MACD + Volume = high probability setup
+        if (stoch_k < self.config.stoch_oversold and stoch_d < self.config.stoch_oversold and 
+            rsi > 50 and macd_line > macd_signal and macd_histogram > 0 and
+            volume_ratio > self.config.min_volume_multiplier):
+            long_score += 3  # Strong combined signal with all confirmations
+            logger.debug(f"StochRSIMACD bullish strategy triggered: Stoch K={stoch_k:.1f}, RSI={rsi:.1f}, MACD+, Vol={volume_ratio:.2f}x")
         
         # Score for SHORT signal
         short_score = 0
@@ -1058,15 +1082,21 @@ class SignalGenerator:
         elif macd_line < macd_signal:
             short_score += 1  # MACD crossover
         
-        # Stochastic overbought rejection
-        if stoch_k > 80 and stoch_d > 80:
-            short_score += 2  # Strong overbought
-        elif stoch_k > 70:
+        # Stochastic overbought rejection (stricter thresholds)
+        if stoch_k > self.config.stoch_overbought and stoch_d > self.config.stoch_overbought:
+            short_score += 2  # Strong overbought (now requires >85)
+        elif stoch_k > 75:
             short_score += 1  # Mild overbought
         
-        # ADX trend strength (only add if strong trend exists)
-        if adx > 25:
-            short_score += 1  # Strong trend confirmation
+        # ADX trend strength (avoid choppy markets)
+        if adx < self.config.min_adx_threshold:
+            # Penalize signals in choppy/ranging markets
+            logger.debug(f"ADX too low ({adx:.1f} < {self.config.min_adx_threshold}) - weak/choppy market, reducing confidence")
+            short_score = max(0, short_score - 2)  # Reduce score for low ADX
+        elif adx > 35:
+            short_score += 2  # Strong trend
+        elif adx > 25:
+            short_score += 1  # Moderate trend
         
         # Ichimoku bearish signal (Tenkan below Kijun = bearish)
         if tenkan < kijun:
@@ -1078,9 +1108,17 @@ class SignalGenerator:
         elif cmf < 0:
             short_score += 1  # Mild selling pressure
         
-        # Volume confirmation
-        if volume > volume_ma * 1.2:
-            short_score += 1
+        # Volume confirmation (stricter requirements)
+        if volume_ratio > 3.0:
+            short_score += 3  # Exceptional volume
+        elif volume_ratio > 2.0:
+            short_score += 2  # High volume
+        elif volume_ratio > self.config.min_volume_multiplier:
+            short_score += 1  # Above average volume
+        else:
+            # Penalize low volume signals
+            logger.debug(f"Volume too low ({volume_ratio:.2f}x) - not enough liquidity")
+            short_score = max(0, short_score - 1)
         
         # Pattern confirmations
         if bos == 'BEARISH':
@@ -1093,11 +1131,13 @@ class SignalGenerator:
             short_score += 2  # Candle wick reversal pattern
             logger.debug(f"Bearish candle wick reversal detected")
         
-        # StochRSIMACD Strategy: Powerful combination for scalping reversals
-        # Stochastic overbought (>80) + RSI bearish (<50) + MACD crossover = high probability setup
-        if stoch_k > 80 and stoch_d > 80 and rsi < 50 and macd_line < macd_signal:
-            short_score += 3  # Strong combined signal for scalping
-            logger.debug(f"StochRSIMACD bearish strategy triggered: Stoch K={stoch_k:.1f}, RSI={rsi:.1f}, MACD crossover")
+        # StochRSIMACD Strategy: Stricter requirements for better win rate
+        # Stochastic extreme + RSI confirmation + MACD + Volume = high probability setup
+        if (stoch_k > self.config.stoch_overbought and stoch_d > self.config.stoch_overbought and 
+            rsi < 50 and macd_line < macd_signal and macd_histogram < 0 and
+            volume_ratio > self.config.min_volume_multiplier):
+            short_score += 3  # Strong combined signal with all confirmations
+            logger.debug(f"StochRSIMACD bearish strategy triggered: Stoch K={stoch_k:.1f}, RSI={rsi:.1f}, MACD-, Vol={volume_ratio:.2f}x")
         
         # Apply market direction filter if enabled
         if self.config.use_market_direction_filter and market_direction:
